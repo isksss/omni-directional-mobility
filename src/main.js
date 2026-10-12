@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { constrainRope } from "./flight.js";
-import { updateEnemy } from "./enemies.js";
+import { getEnemyGait, updateEnemy } from "./enemies.js";
 import "./style.css";
 
 const canvas = document.querySelector("#game");
@@ -408,23 +408,51 @@ for (let chunk = 0; chunk < litWindows.length; chunk++) {
 }
 
 const enemies = [];
-const enemyBodyGeometry = new THREE.CapsuleGeometry(0.3, 0.78, 3, 8);
-const enemyHeadGeometry = new THREE.SphereGeometry(0.22, 8, 6);
-const enemyArmGeometry = new THREE.CylinderGeometry(0.1, 0.12, 0.7, 6);
-const enemyMaterial = new THREE.MeshStandardMaterial({
-  color: "#dc5962",
-  emissive: "#5c1019",
+const enemyBodyGeometry = new THREE.CylinderGeometry(0.22, 0.29, 0.64, 6);
+const enemyPelvisGeometry = new THREE.BoxGeometry(0.4, 0.24, 0.28);
+const enemyHelmetGeometry = new THREE.DodecahedronGeometry(0.22, 0);
+const enemyNeckGeometry = new THREE.CylinderGeometry(0.09, 0.11, 0.14, 6);
+const enemyVisorGeometry = new THREE.BoxGeometry(0.31, 0.085, 0.045);
+const enemyUpperArmGeometry = new THREE.CylinderGeometry(0.085, 0.12, 0.36, 6);
+const enemyLowerArmGeometry = new THREE.CylinderGeometry(0.075, 0.1, 0.31, 6);
+const enemyUpperLegGeometry = new THREE.CylinderGeometry(0.13, 0.16, 0.4, 6);
+const enemyLowerLegGeometry = new THREE.CylinderGeometry(0.1, 0.13, 0.36, 6);
+const enemyJointGeometry = new THREE.SphereGeometry(0.11, 6, 5);
+const enemyArmorMaterial = new THREE.MeshStandardMaterial({
+  color: "#344352",
+  metalness: 0.58,
+  roughness: 0.42,
+});
+const enemySuitMaterial = new THREE.MeshStandardMaterial({
+  color: "#202833",
+  roughness: 0.78,
+});
+const enemyDetailMaterial = new THREE.MeshStandardMaterial({
+  color: "#ed684e",
+  emissive: "#9f261c",
   emissiveIntensity: 0.8,
-  roughness: 0.8,
+  metalness: 0.3,
+  roughness: 0.48,
 });
-const enemyHeadMaterial = new THREE.MeshStandardMaterial({
-  color: "#f0bd95",
-  roughness: 0.9,
+const enemyVisorMaterial = new THREE.MeshStandardMaterial({
+  color: "#72efff",
+  emissive: "#22cce8",
+  emissiveIntensity: 2,
+  metalness: 0.35,
+  roughness: 0.25,
 });
+const enemyJointMaterial = new THREE.MeshStandardMaterial({
+  color: "#131a22",
+  metalness: 0.65,
+  roughness: 0.38,
+});
+const enemyBootGeometry = new THREE.BoxGeometry(0.2, 0.12, 0.32);
+const enemyChestPlateGeometry = new THREE.BoxGeometry(0.45, 0.31, 0.12);
+const enemyChestLightGeometry = new THREE.BoxGeometry(0.24, 0.035, 0.025);
 function syncEnemy(enemy) {
   enemy.group.position.set(
     enemy.axis === "x" ? enemy.along : enemy.lane,
-    0,
+    Math.abs(Math.sin(enemy.walkPhase * 2)) * 0.025,
     enemy.axis === "x" ? enemy.lane : enemy.along,
   );
   enemy.group.rotation.y =
@@ -435,20 +463,88 @@ function syncEnemy(enemy) {
       : enemy.direction > 0
         ? Math.PI
         : 0;
+  for (let i = 0; i < 2; i++) {
+    const gait = getEnemyGait(enemy.walkPhase + i * Math.PI);
+    enemy.legs[i].rotation.x = gait.leg;
+    enemy.knees[i].rotation.x = gait.knee;
+    enemy.arms[i].rotation.x = gait.arm;
+  }
   enemy.group.updateMatrixWorld(true);
 }
 function spawnEnemy() {
   const group = new THREE.Group();
-  const body = new THREE.Mesh(enemyBodyGeometry, enemyMaterial);
-  body.position.y = 0.72;
-  const head = new THREE.Mesh(enemyHeadGeometry, enemyHeadMaterial);
-  head.position.y = 1.58;
-  group.add(body, head);
+  const body = new THREE.Mesh(enemyBodyGeometry, enemySuitMaterial);
+  body.position.y = 1.12;
+  group.add(body);
+
+  const pelvis = new THREE.Mesh(enemyPelvisGeometry, enemySuitMaterial);
+  pelvis.position.y = 0.77;
+  group.add(pelvis);
+  const chestPlate = new THREE.Mesh(enemyChestPlateGeometry, enemyArmorMaterial);
+  chestPlate.position.set(0, 1.23, -0.2);
+  group.add(chestPlate);
+  const chestLight = new THREE.Mesh(enemyChestLightGeometry, enemyDetailMaterial);
+  chestLight.position.set(0, 1.2, -0.27);
+  group.add(chestLight);
+
+  const neck = new THREE.Mesh(enemyNeckGeometry, enemyJointMaterial);
+  neck.position.y = 1.51;
+  group.add(neck);
+  const helmet = new THREE.Mesh(enemyHelmetGeometry, enemyArmorMaterial);
+  helmet.position.y = 1.69;
+  group.add(helmet);
+  const visor = new THREE.Mesh(enemyVisorGeometry, enemyVisorMaterial);
+  visor.position.set(0, 1.69, -0.2);
+  group.add(visor);
+
+  const arms = [];
+  const legs = [];
+  const knees = [];
   for (const side of [-1, 1]) {
-    const arm = new THREE.Mesh(enemyArmGeometry, enemyMaterial);
-    arm.position.set(side * 0.39, 1.02, 0);
-    arm.rotation.z = side * -0.16;
+    const arm = new THREE.Group();
+    arm.position.set(side * 0.31, 1.4, 0);
     group.add(arm);
+    const shoulder = new THREE.Mesh(enemyJointGeometry, enemyArmorMaterial);
+    shoulder.scale.set(1.35, 1.1, 1.3);
+    shoulder.position.y = -0.04;
+    arm.add(shoulder);
+    const upperArm = new THREE.Mesh(enemyUpperArmGeometry, enemySuitMaterial);
+    upperArm.position.y = -0.19;
+    arm.add(upperArm);
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.36;
+    arm.add(elbow);
+    const elbowJoint = new THREE.Mesh(enemyJointGeometry, enemyJointMaterial);
+    elbow.add(elbowJoint);
+    const forearm = new THREE.Mesh(enemyLowerArmGeometry, enemyArmorMaterial);
+    forearm.position.y = -0.15;
+    elbow.add(forearm);
+    const hand = new THREE.Mesh(enemyJointGeometry, enemySuitMaterial);
+    hand.scale.set(0.78, 0.8, 0.82);
+    hand.position.set(0, -0.31, -0.015);
+    elbow.add(hand);
+    arms.push(arm);
+
+    const leg = new THREE.Group();
+    leg.position.set(side * 0.14, 0.78, 0);
+    group.add(leg);
+    const thigh = new THREE.Mesh(enemyUpperLegGeometry, enemySuitMaterial);
+    thigh.position.y = -0.2;
+    leg.add(thigh);
+    const knee = new THREE.Group();
+    knee.position.y = -0.4;
+    leg.add(knee);
+    const kneePad = new THREE.Mesh(enemyJointGeometry, enemyArmorMaterial);
+    kneePad.scale.set(1.15, 0.95, 1.1);
+    knee.add(kneePad);
+    const shin = new THREE.Mesh(enemyLowerLegGeometry, enemyArmorMaterial);
+    shin.position.y = -0.18;
+    knee.add(shin);
+    const boot = new THREE.Mesh(enemyBootGeometry, enemyJointMaterial);
+    boot.position.set(0, -0.37, -0.06);
+    knee.add(boot);
+    legs.push(leg);
+    knees.push(knee);
   }
 
   const enemy = {
@@ -457,6 +553,10 @@ function spawnEnemy() {
     along: rand(-192, 192),
     direction: random() < 0.5 ? -1 : 1,
     speed: rand(1.4, 2.6),
+    walkPhase: rand(0, Math.PI * 2),
+    arms,
+    legs,
+    knees,
     group,
   };
   group.userData.enemy = enemy;
@@ -624,6 +724,7 @@ function updateEnemies(dt) {
   }
   for (const enemy of enemies) {
     updateEnemy(enemy, dt, random);
+    enemy.walkPhase += dt * enemy.speed * 2.5;
     syncEnemy(enemy);
   }
 }

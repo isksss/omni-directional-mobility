@@ -3,6 +3,11 @@ const ROAD_LIMIT = 192;
 const TURN_CHANCE = 0.32;
 const EPSILON = 1e-9;
 
+export function getEnemyGait(phase) {
+  const stride = Math.sin(phase);
+  return { leg: stride * 0.48, knee: Math.max(0, stride) * 0.65, arm: -stride * 0.32 };
+}
+
 export function updateEnemy(enemy, dt, random = Math.random) {
   let remaining = enemy.speed * dt;
   while (remaining > EPSILON) {

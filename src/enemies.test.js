@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { updateEnemy } from "./enemies.js";
+import { getEnemyGait, updateEnemy } from "./enemies.js";
+
+test("enemy gait swings the arms opposite the legs and bends the stepping knee", () => {
+  assert.deepEqual(getEnemyGait(Math.PI / 2), { leg: 0.48, knee: 0.65, arm: -0.32 });
+  assert.deepEqual(getEnemyGait((Math.PI * 3) / 2), { leg: -0.48, knee: 0, arm: 0.32 });
+});
 
 test("enemies can turn at intersections and continue along the crossing road", () => {
   const enemy = { axis: "x", lane: 0, along: 46, direction: 1, speed: 4 };

@@ -10,10 +10,11 @@ import {
   terrainHeight,
   type RoadSample,
 } from "./city-layout.ts";
-import type { BuildingBounds, RandomSource } from "./game-types.ts";
+import type { BuildingBounds, Position3, RandomSource } from "./game-types.ts";
 import { randomBetween } from "./game-utils.ts";
 
 export interface CityBuilding extends BuildingBounds {
+  entranceBaseY: number;
   entranceWidth: number;
   entranceHeight: number;
 }
@@ -392,6 +393,7 @@ export function createCity(
         depth,
         height,
         baseY: terrainHeight(x, z),
+        entranceBaseY: terrainHeight(x, minZ),
         entranceWidth,
         entranceHeight: ENTRANCE_HEIGHT,
       });
@@ -956,6 +958,77 @@ export function createCity(
   return { buildings, facadeMeshes, obstacles: vehicleObstacles };
 }
 
+export function isGrounded(
+  position: Position3,
+  velocity: Position3,
+  buildings: BuildingBounds[],
+): boolean {
+  if (velocity.y > 0) return false;
+  if (position.y <= terrainHeight(position.x, position.z) + 0.03) return true;
+  return buildings.some(
+    (building) =>
+      Math.abs(position.x - building.x) < building.width / 2 &&
+      Math.abs(position.z - building.z) < building.depth / 2 &&
+      Math.abs(position.y - ((building.baseY ?? 0) + building.height)) <= 0.03,
+  );
+}
+
+export function blocksBuildingSight(
+  x1: number,
+  y1: number,
+  z1: number,
+  x2: number,
+  y2: number,
+  z2: number,
+  building: BuildingBounds,
+): boolean {
+  const epsilon = 1e-9;
+  const baseY = building.baseY ?? 0;
+  const min = [building.x - building.width / 2, baseY, building.z - building.depth / 2];
+  const max = [
+    building.x + building.width / 2,
+    baseY + building.height,
+    building.z + building.depth / 2,
+  ];
+  const start = [x1, y1, z1];
+  const delta = [x2 - x1, y2 - y1, z2 - z1];
+  let enter = 0;
+  let exit = 1;
+  for (let axis = 0; axis < 3; axis++) {
+    if (Math.abs(delta[axis]!) < epsilon) {
+      if (start[axis]! < min[axis]! || start[axis]! > max[axis]!) return false;
+      continue;
+    }
+    let first = (min[axis]! - start[axis]!) / delta[axis]!;
+    let last = (max[axis]! - start[axis]!) / delta[axis]!;
+    if (first > last) [first, last] = [last, first];
+    enter = Math.max(enter, first);
+    exit = Math.min(exit, last);
+    if (enter > exit) return false;
+  }
+  if (exit < 0 || enter > 1) return false;
+
+  const isDoor = (t: number) => {
+    const px = x1 + delta[0]! * t;
+    const py = y1 + delta[1]! * t;
+    const pz = z1 + delta[2]! * t;
+    const entranceBaseY = building.entranceBaseY ?? baseY;
+    return (
+      Math.abs(pz - min[2]!) < 0.35 &&
+      Math.abs(px - building.x) < (building.entranceWidth ?? 2.8) / 2 &&
+      py >= entranceBaseY &&
+      py < entranceBaseY + (building.entranceHeight ?? 2.7)
+    );
+  };
+  const startsInside =
+    x1 > min[0]! && x1 < max[0]! && y1 > min[1]! && y1 < max[1]! && z1 > min[2]! && z1 < max[2]!;
+  const endsInside =
+    x2 > min[0]! && x2 < max[0]! && y2 > min[1]! && y2 < max[1]! && z2 > min[2]! && z2 < max[2]!;
+  if (!startsInside && enter >= 0 && enter <= 1 && !isDoor(enter)) return true;
+  if (!endsInside && exit >= 0 && exit <= 1 && exit - enter > epsilon && !isDoor(exit)) return true;
+  return false;
+}
+
 function resolveBuildingCollisionStep(
   position: THREE.Vector3,
   previousPosition: THREE.Vector3,
@@ -971,7 +1044,7 @@ function resolveBuildingCollisionStep(
     const baseY = building.baseY ?? 0;
     const topY = baseY + building.height;
     const entranceWidth = building.entranceWidth ?? 0;
-    const entranceHeight = building.entranceHeight ?? 0;
+    const entranceTopY = (building.entranceBaseY ?? baseY) + (building.entranceHeight ?? 0);
     const wasInside =
       previousPosition.x > minX &&
       previousPosition.x < maxX &&
@@ -998,7 +1071,7 @@ function resolveBuildingCollisionStep(
       const withinDoor =
         Math.abs(position.x - building.x) < entranceWidth / 2 - 0.15 &&
         Math.abs(previousPosition.x - building.x) < entranceWidth / 2 - 0.15 &&
-        position.y + 1.9 <= baseY + entranceHeight &&
+        position.y + 1.9 <= entranceTopY &&
         crossedFront;
       if (!withinDoor) {
         position.x = previousPosition.x;
@@ -1017,7 +1090,7 @@ function resolveBuildingCollisionStep(
       Math.abs(position.x - building.x) < entranceWidth / 2 - 0.15 &&
       position.z <= minZ &&
       position.z > minZ - COLLISION_RADIUS;
-    if (approachingDoor && position.y + 1.9 <= baseY + entranceHeight) continue;
+    if (approachingDoor && position.y + 1.9 <= entranceTopY) continue;
 
     if (overlapX < overlapZ) {
       const side = position.x < building.x ? -1 : 1;

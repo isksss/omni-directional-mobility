@@ -17,7 +17,11 @@ test("safe zone waits, shrinks monotonically and stops at its final radius", () 
   assert.equal(getSafeZoneRadius(20), ZONE_START_RADIUS);
   assert.equal(getSafeZoneRadius(110), 151.5);
   assert.equal(getSafeZoneRadius(300), ZONE_FINAL_RADIUS);
-  assert.equal(formatZoneTimeRemaining(0), "03:20");
+  assert.equal(formatZoneTimeRemaining(0), "00:20");
+  assert.equal(formatZoneTimeRemaining(19.99), "00:01");
+  assert.equal(formatZoneTimeRemaining(20), "03:00");
+  assert.equal(formatZoneTimeRemaining(110), "01:30");
+  assert.equal(formatZoneTimeRemaining(200), "00:00");
   assert.equal(formatZoneTimeRemaining(201), "00:00");
 });
 

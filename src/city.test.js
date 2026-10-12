@@ -82,6 +82,7 @@ test("city generation creates enterable buildings and leaves the scramble crossi
     assert.ok(buildings.length > 180);
     assert.ok(buildings.every((item) => item.entranceWidth > 0 && item.entranceHeight > 0));
     assert.ok(buildings.every((item) => Number.isFinite(item.baseY)));
+    assert.ok(buildings.every((item) => Number.isFinite(item.entranceBaseY)));
     assert.ok(buildings.some((item) => item.baseY > 5));
     assert.ok(buildings.every((item) => !(Math.abs(item.x) < 24 && Math.abs(item.z) < 24)));
     assert.ok(facadeMeshes.length > 0);

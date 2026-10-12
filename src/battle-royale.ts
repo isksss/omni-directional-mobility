@@ -18,7 +18,9 @@ export function isOutsideSafeZone(position: Position3, radius: number): boolean 
 }
 
 export function getZoneTimeRemaining(elapsed: number): number {
-  return Math.max(0, ZONE_START_DELAY + ZONE_SHRINK_DURATION - elapsed);
+  const deadline =
+    elapsed < ZONE_START_DELAY ? ZONE_START_DELAY : ZONE_START_DELAY + ZONE_SHRINK_DURATION;
+  return Math.max(0, deadline - elapsed);
 }
 
 export function formatZoneTimeRemaining(elapsed: number): string {

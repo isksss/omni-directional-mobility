@@ -1,3 +1,5 @@
+import { Vector3 } from "three";
+import { blocksBuildingSight, resolveBuildingCollision } from "./city.ts";
 import {
   CITY_ROADS,
   connectedRoads,
@@ -10,6 +12,9 @@ import type { BuildingBounds, Position3, RandomSource } from "./game-types.ts";
 import type { EnemyActor } from "./enemy-visuals.ts";
 
 const EPSILON = 1e-9;
+const collisionPrevious = new Vector3();
+const collisionCandidate = new Vector3();
+const collisionVelocity = new Vector3();
 const ENEMY_VISION_RANGE = 78;
 const ENEMY_FIRE_RANGE = 46;
 export const ENEMY_DAMAGE = 10;
@@ -105,64 +110,51 @@ export function updateEnemyAI(
   return { hit: random() < Math.max(0.2, 0.82 - distance / 75) };
 }
 
-function blocksBuildingSight(
-  x1: number,
-  y1: number,
-  z1: number,
-  x2: number,
-  y2: number,
-  z2: number,
-  building: BuildingBounds,
+export function moveEnemyToward(
+  enemy: EnemyActor,
+  targetX: number,
+  targetZ: number,
+  dt: number,
+  stoppingDistance: number,
+  buildings: BuildingBounds[],
 ): boolean {
-  const baseY = building.baseY ?? 0;
-  const min = [building.x - building.width / 2, baseY, building.z - building.depth / 2];
-  const max = [
-    building.x + building.width / 2,
-    baseY + building.height,
-    building.z + building.depth / 2,
-  ];
-  const start = [x1, y1, z1];
-  const delta = [x2 - x1, y2 - y1, z2 - z1];
-  let enter = 0;
-  let exit = 1;
-  for (let axis = 0; axis < 3; axis++) {
-    if (Math.abs(delta[axis]!) < EPSILON) {
-      if (start[axis]! < min[axis]! || start[axis]! > max[axis]!) return false;
-      continue;
-    }
-    let first = (min[axis]! - start[axis]!) / delta[axis]!;
-    let last = (max[axis]! - start[axis]!) / delta[axis]!;
-    if (first > last) [first, last] = [last, first];
-    enter = Math.max(enter, first);
-    exit = Math.min(exit, last);
-    if (enter > exit) return false;
-  }
-  if (exit < 0 || enter > 1) return false;
-
-  const isDoor = (t: number) => {
-    const px = x1 + delta[0]! * t;
-    const py = y1 + delta[1]! * t;
-    const pz = z1 + delta[2]! * t;
-    return (
-      Math.abs(pz - min[2]!) < 0.35 &&
-      Math.abs(px - building.x) < (building.entranceWidth ?? 2.8) / 2 &&
-      py < baseY + (building.entranceHeight ?? 2.7)
-    );
-  };
-  const startsInside =
-    x1 > min[0]! && x1 < max[0]! && y1 > min[1]! && y1 < max[1]! && z1 > min[2]! && z1 < max[2]!;
-  const endsInside =
-    x2 > min[0]! && x2 < max[0]! && y2 > min[1]! && y2 < max[1]! && z2 > min[2]! && z2 < max[2]!;
-  if (!startsInside && enter >= 0 && enter <= 1 && !isDoor(enter)) return true;
-  if (!endsInside && exit >= 0 && exit <= 1 && exit - enter > EPSILON && !isDoor(exit)) return true;
-  return false;
+  const x = enemy.navX;
+  const z = enemy.navZ;
+  const dx = targetX - x;
+  const dz = targetZ - z;
+  const distance = Math.hypot(dx, dz);
+  if (distance > 0) enemy.targetHeading = Math.atan2(-dx, -dz);
+  if (distance <= stoppingDistance) return false;
+  const step = Math.min(distance - stoppingDistance, enemy.moveSpeed * dt);
+  const nextX = x + (dx / distance) * step;
+  const nextZ = z + (dz / distance) * step;
+  collisionPrevious.set(x, terrainHeight(x, z), z);
+  collisionCandidate.set(nextX, terrainHeight(nextX, nextZ), nextZ);
+  collisionVelocity.subVectors(collisionCandidate, collisionPrevious);
+  resolveBuildingCollision(
+    collisionCandidate,
+    collisionPrevious,
+    collisionVelocity,
+    buildings,
+    collisionPrevious.y,
+  );
+  const moved = collisionCandidate.x !== x || collisionCandidate.z !== z;
+  enemy.navX = collisionCandidate.x;
+  enemy.navZ = collisionCandidate.z;
+  return moved;
 }
 
 export function updateEnemy(
   enemy: EnemyActor,
   dt: number,
   random: RandomSource = Math.random,
+  buildings: BuildingBounds[] = [],
 ): boolean {
+  const roadPosition = getRoadPosition(enemy.roadId, enemy.roadDistance, enemy.roadDirection);
+  if (Math.hypot(enemy.navX - roadPosition.x, enemy.navZ - roadPosition.z) > EPSILON) {
+    // shortcut: return directly and stop at walls; add pathfinding when detours are needed.
+    return moveEnemyToward(enemy, roadPosition.x, roadPosition.z, dt, 0, buildings);
+  }
   let remaining = enemy.moveSpeed * dt;
   let moved = false;
   while (remaining > EPSILON) {

@@ -4,7 +4,7 @@ import { CITY_ROADS, getRoadLength, getRoadPosition } from "./city-layout.ts";
 import { getEnemyGait, smoothHeading, updateEnemy, updateEnemyAI } from "./enemies.ts";
 
 function makeEnemy(overrides = {}) {
-  return {
+  const enemy = {
     roadId: "dogen-lower",
     roadDistance: 0,
     roadDirection: 1,
@@ -28,6 +28,10 @@ function makeEnemy(overrides = {}) {
     aiTimer: 0,
     ...overrides,
   };
+  const location = getRoadPosition(enemy.roadId, enemy.roadDistance, enemy.roadDirection);
+  enemy.navX = overrides.navX ?? location.x;
+  enemy.navZ = overrides.navZ ?? location.z;
+  return enemy;
 }
 
 test("enemy heading turns along the short arc and settles smoothly", () => {

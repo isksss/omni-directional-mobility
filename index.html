@@ -6,21 +6,25 @@
     <meta name="theme-color" content="#0b1019" />
     <meta
       name="description"
-      content="立体機動装置で夜の街を駆け抜ける、ブラウザで遊べるフリーフライトゲーム。"
+      content="渋谷スクランブル交差点をモチーフにした街を探索し、敵と戦う一人称視点フリーフライトゲーム。"
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>OMNI — Vertical Mobility</title>
   </head>
   <body>
-    <canvas id="game" aria-label="一人称視点で立体機動装置を使い、街を飛び回る3Dゲーム"></canvas>
+    <canvas
+      id="game"
+      aria-label="渋谷スクランブル交差点を舞台にした一人称視点3Dフライトゲーム"
+    ></canvas>
+    <div id="damage-overlay" aria-hidden="true"></div>
 
     <header class="topbar" aria-label="ゲーム情報">
       <a class="brand" href="#" aria-label="OMNI ホーム">
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
         <span><strong>OMNI</strong><small>VERTICAL MOBILITY</small></span>
       </a>
-      <div class="district"><span class="live-dot"></span> TRAINING DISTRICT <b>07</b></div>
-      <div class="session-label">FREE ROAM <span>／</span> 夕暮れの街</div>
+      <div class="district"><span class="live-dot"></span> SHIBUYA CROSSING <b>TOKYO</b></div>
+      <div class="session-label">FREE ROAM <span>／</span> 渋谷スクランブル交差点</div>
     </header>
 
     <main>
@@ -29,13 +33,13 @@
           <p class="eyebrow"><span>01</span> — FIRST-PERSON FLIGHT</p>
           <h1 id="intro-title">街を、<br /><em>縦横無尽に。</em></h1>
           <p class="intro-copy">
-            ワイヤーで街を駆け抜け、闊歩する敵を撃ち倒そう。<br />ルートもゴールもない、自由飛行と射撃のトレーニング。
+            渋谷スクランブル交差点を駆け抜け、ビルの店内まで探索しよう。<br />索敵して襲ってくる敵を撃退しながら、ワイヤーで街を縦横無尽に飛び回れ。
           </p>
           <button id="start-button" class="primary-button" type="button">
             <span>FLIGHT START</span><span aria-hidden="true">↗</span>
           </button>
           <div class="quick-controls" aria-label="基本操作">
-            <span><kbd data-key-label="movement">W A S D</kbd> 移動</span>
+            <span><kbd data-key-label="movement">W A S D</kbd> 移動・店内探索</span>
             <span><kbd>マウス</kbd> 視点</span>
             <span>
               <kbd data-key-label="hookLeft">Q</kbd>/<kbd data-key-label="hookRight">E</kbd>
@@ -128,6 +132,12 @@
           <div class="telemetry-label"><span class="live-dot"></span> FLIGHT TELEMETRY</div>
           <div class="altitude-readout"><span id="altitude-value">0</span><small> M</small></div>
           <div class="metric-caption">ALTITUDE <span>／</span> ABOVE STREET</div>
+          <div class="player-vitals" aria-label="プレイヤー体力">
+            <div>
+              <span>VITALS</span><b><span id="player-health-value">100</span><small> HP</small></b>
+            </div>
+            <div class="health-track"><i id="player-health-bar"></i></div>
+          </div>
         </div>
         <div class="hud-top-right">
           <span class="enemy-readout"

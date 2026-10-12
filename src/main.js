@@ -1,6 +1,8 @@
 import * as THREE from "three";
+import { createCity, resolveBuildingCollision } from "./city.js";
+import { createEnemy, syncEnemy, updateEnemyHealthBar } from "./enemy-visuals.js";
 import { constrainRope } from "./flight.js";
-import { getEnemyGait, updateEnemy } from "./enemies.js";
+import { updateEnemy, updateEnemyAI } from "./enemies.js";
 import "./style.css";
 
 const canvas = document.querySelector("#game");
@@ -15,6 +17,9 @@ const enemyCountValue = document.querySelector("#enemy-count");
 const killCountValue = document.querySelector("#kill-count");
 const speedValue = document.querySelector("#speed-value");
 const altitudeValue = document.querySelector("#altitude-value");
+const playerHealthValue = document.querySelector("#player-health-value");
+const playerHealthBar = document.querySelector("#player-health-bar");
+const damageOverlay = document.querySelector("#damage-overlay");
 const sensitivityInputs = [...document.querySelectorAll("[data-vertical-sensitivity]")];
 const sensitivityOutputs = [...document.querySelectorAll("[data-sensitivity-value]")];
 let verticalSensitivity = 1;
@@ -223,346 +228,12 @@ const random = (() => {
 })();
 const rand = (min, max) => min + random() * (max - min);
 const citySize = 460;
-const buildings = [];
-const object = new THREE.Object3D();
-
-function groundRect(width, depth, x, z, y, material) {
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), material);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.set(x, y, z);
-  scene.add(mesh);
-  return mesh;
-}
-
-const groundMaterial = new THREE.MeshStandardMaterial({ color: "#19232c", roughness: 1 });
-const roadMaterial = new THREE.MeshStandardMaterial({ color: "#202a33", roughness: 0.95 });
-const sidewalkMaterial = new THREE.MeshStandardMaterial({ color: "#2b343a", roughness: 0.95 });
-const lineMaterial = new THREE.MeshBasicMaterial({
-  color: "#67716d",
-  transparent: true,
-  opacity: 0.35,
-});
-groundRect(540, 540, 0, 0, -0.08, groundMaterial);
-
-function groundStrips(width, depth, axis, y, material, offset = 0) {
-  const strips = new THREE.InstancedMesh(new THREE.PlaneGeometry(width, depth), material, 9);
-  for (let i = -4; i <= 4; i++) {
-    object.position.set(axis === "x" ? 0 : i * 48 + offset, y, axis === "x" ? i * 48 + offset : 0);
-    object.rotation.set(-Math.PI / 2, 0, 0);
-    object.updateMatrix();
-    strips.setMatrixAt(i + 4, object.matrix);
-  }
-  scene.add(strips);
-}
-groundStrips(citySize, 8, "x", 0.005, roadMaterial);
-groundStrips(8, citySize, "z", 0.006, roadMaterial);
-for (const side of [-1, 1]) {
-  groundStrips(citySize, 1.7, "x", 0.012, sidewalkMaterial, side * 5.1);
-  groundStrips(1.7, citySize, "z", 0.013, sidewalkMaterial, side * 5.1);
-}
-
-const roadDashes = new THREE.InstancedMesh(
-  new THREE.BoxGeometry(6, 0.025, 0.18),
-  lineMaterial,
-  900,
-);
-let dashCount = 0;
-for (let road = -4; road <= 4; road++) {
-  for (let at = -220; at <= 220; at += 12) {
-    object.position.set(at, 0.027, road * 48);
-    object.rotation.set(0, 0, 0);
-    object.updateMatrix();
-    roadDashes.setMatrixAt(dashCount++, object.matrix);
-    object.position.set(road * 48, 0.028, at);
-    object.rotation.set(0, Math.PI / 2, 0);
-    object.updateMatrix();
-    roadDashes.setMatrixAt(dashCount++, object.matrix);
-  }
-}
-roadDashes.count = dashCount;
-scene.add(roadDashes);
-
-const facadeMaterials = ["#293441", "#303744", "#30333b", "#26353a", "#35333a"].map(
-  (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.86, metalness: 0.08 }),
-);
-const facadeMatrices = facadeMaterials.map(() => []);
-const facadeMeshes = [];
-const roofMatrices = [];
-const antennaMatrices = [];
-const unitBoxGeometry = new THREE.BoxGeometry(1, 1, 1);
-const roofMaterial = new THREE.MeshStandardMaterial({ color: "#454950", roughness: 0.9 });
-const antennaMaterial = new THREE.MeshStandardMaterial({
-  color: "#8e9998",
-  metalness: 0.62,
-  roughness: 0.42,
-});
-const antennaGeometry = new THREE.CylinderGeometry(0.09, 0.14, 1, 5);
-const windowGeometry = new THREE.BoxGeometry(0.72, 1, 0.12);
-const litWindowMaterial = new THREE.MeshStandardMaterial({
-  color: "#ffc774",
-  emissive: "#ed9c43",
-  emissiveIntensity: 1.15,
-  roughness: 0.7,
-});
-const darkWindowMaterial = new THREE.MeshStandardMaterial({
-  color: "#35404b",
-  emissive: "#263b4d",
-  emissiveIntensity: 0.35,
-  roughness: 0.8,
-});
-const litWindows = Array.from({ length: 16 }, () => []);
-const darkWindows = Array.from({ length: 16 }, () => []);
-
-function addWindow(x, y, z, rotation, lit, chunk) {
-  object.position.set(x, y, z);
-  object.rotation.set(0, rotation, 0);
-  object.scale.set(1, 1, 1);
-  object.updateMatrix();
-  (lit ? litWindows : darkWindows)[chunk].push(object.matrix.clone());
-}
-
-for (let gx = -8; gx <= 7; gx++) {
-  for (let gz = -8; gz <= 7; gz++) {
-    if (random() < 0.08) continue;
-    const x = gx * 24 + 12;
-    const z = gz * 24 + 12;
-    const width = rand(9, 15);
-    const depth = rand(9, 15);
-    const height = rand(14, 58);
-    const chunk = Math.floor((gx + 8) / 4) + Math.floor((gz + 8) / 4) * 4;
-    object.rotation.set(0, 0, 0);
-    object.position.set(x, height / 2, z);
-    object.scale.set(width, height, depth);
-    object.updateMatrix();
-    facadeMatrices[Math.floor(random() * facadeMaterials.length)].push(object.matrix.clone());
-    object.position.set(x, height + 0.27, z);
-    object.scale.set(width + 0.7, 0.55, depth + 0.7);
-    object.updateMatrix();
-    roofMatrices.push(object.matrix.clone());
-    buildings.push({ x, z, width, depth, height });
-
-    for (let floor = 2.6; floor < height - 1; floor += 4.3) {
-      for (let offset = -width / 2 + 1.35; offset <= width / 2 - 1; offset += 3.7) {
-        if (random() > 0.32) {
-          const lit = random() < 0.65;
-          addWindow(x + offset, floor, z - depth / 2 - 0.07, 0, lit, chunk);
-          addWindow(x + offset, floor, z + depth / 2 + 0.07, Math.PI, lit, chunk);
-        }
-      }
-      for (let offset = -depth / 2 + 1.35; offset <= depth / 2 - 1; offset += 3.7) {
-        if (random() > 0.32) {
-          const lit = random() < 0.65;
-          addWindow(x - width / 2 - 0.07, floor, z + offset, Math.PI / 2, lit, chunk);
-          addWindow(x + width / 2 + 0.07, floor, z + offset, -Math.PI / 2, lit, chunk);
-        }
-      }
-    }
-
-    if (random() < 0.82) {
-      const count = random() < 0.2 ? 2 : 1;
-      for (let i = 0; i < count; i++) {
-        const ax =
-          x + (count === 1 ? rand(-width * 0.26, width * 0.26) : (i ? 1 : -1) * width * 0.23);
-        const az =
-          z + (count === 1 ? rand(-depth * 0.26, depth * 0.26) : rand(-depth * 0.2, depth * 0.2));
-        const antennaHeight = rand(2.3, 5.5);
-        object.rotation.set(0, 0, 0);
-        object.position.set(ax, height + antennaHeight / 2, az);
-        object.scale.set(1, antennaHeight, 1);
-        object.updateMatrix();
-        antennaMatrices.push(object.matrix.clone());
-      }
-    }
-  }
-}
-
-for (const [mat, matrices] of facadeMaterials.map((material, index) => [
-  material,
-  facadeMatrices[index],
-])) {
-  const facades = new THREE.InstancedMesh(unitBoxGeometry, mat, matrices.length);
-  matrices.forEach((matrix, index) => facades.setMatrixAt(index, matrix));
-  facades.instanceMatrix.needsUpdate = true;
-  facadeMeshes.push(facades);
-  scene.add(facades);
-}
-const roofs = new THREE.InstancedMesh(unitBoxGeometry, roofMaterial, roofMatrices.length);
-roofMatrices.forEach((matrix, index) => roofs.setMatrixAt(index, matrix));
-roofs.instanceMatrix.needsUpdate = true;
-scene.add(roofs);
-const antennae = new THREE.InstancedMesh(antennaGeometry, antennaMaterial, antennaMatrices.length);
-antennaMatrices.forEach((matrix, index) => antennae.setMatrixAt(index, matrix));
-antennae.instanceMatrix.needsUpdate = true;
-scene.add(antennae);
-for (let chunk = 0; chunk < litWindows.length; chunk++) {
-  for (const [mat, matrices] of [
-    [litWindowMaterial, litWindows[chunk]],
-    [darkWindowMaterial, darkWindows[chunk]],
-  ]) {
-    if (!matrices.length) continue;
-    const windows = new THREE.InstancedMesh(windowGeometry, mat, matrices.length);
-    matrices.forEach((matrix, index) => windows.setMatrixAt(index, matrix));
-    windows.instanceMatrix.needsUpdate = true;
-    scene.add(windows);
-  }
-}
+const city = createCity(scene, random);
+const { buildings, facadeMeshes } = city;
 
 const enemies = [];
-const enemyBodyGeometry = new THREE.CylinderGeometry(0.22, 0.29, 0.64, 6);
-const enemyPelvisGeometry = new THREE.BoxGeometry(0.4, 0.24, 0.28);
-const enemyHelmetGeometry = new THREE.DodecahedronGeometry(0.22, 0);
-const enemyNeckGeometry = new THREE.CylinderGeometry(0.09, 0.11, 0.14, 6);
-const enemyVisorGeometry = new THREE.BoxGeometry(0.31, 0.085, 0.045);
-const enemyUpperArmGeometry = new THREE.CylinderGeometry(0.085, 0.12, 0.36, 6);
-const enemyLowerArmGeometry = new THREE.CylinderGeometry(0.075, 0.1, 0.31, 6);
-const enemyUpperLegGeometry = new THREE.CylinderGeometry(0.13, 0.16, 0.4, 6);
-const enemyLowerLegGeometry = new THREE.CylinderGeometry(0.1, 0.13, 0.36, 6);
-const enemyJointGeometry = new THREE.SphereGeometry(0.11, 6, 5);
-const enemyArmorMaterial = new THREE.MeshStandardMaterial({
-  color: "#344352",
-  metalness: 0.58,
-  roughness: 0.42,
-});
-const enemySuitMaterial = new THREE.MeshStandardMaterial({
-  color: "#202833",
-  roughness: 0.78,
-});
-const enemyDetailMaterial = new THREE.MeshStandardMaterial({
-  color: "#ed684e",
-  emissive: "#9f261c",
-  emissiveIntensity: 0.8,
-  metalness: 0.3,
-  roughness: 0.48,
-});
-const enemyVisorMaterial = new THREE.MeshStandardMaterial({
-  color: "#72efff",
-  emissive: "#22cce8",
-  emissiveIntensity: 2,
-  metalness: 0.35,
-  roughness: 0.25,
-});
-const enemyJointMaterial = new THREE.MeshStandardMaterial({
-  color: "#131a22",
-  metalness: 0.65,
-  roughness: 0.38,
-});
-const enemyBootGeometry = new THREE.BoxGeometry(0.2, 0.12, 0.32);
-const enemyChestPlateGeometry = new THREE.BoxGeometry(0.45, 0.31, 0.12);
-const enemyChestLightGeometry = new THREE.BoxGeometry(0.24, 0.035, 0.025);
-function syncEnemy(enemy) {
-  enemy.group.position.set(
-    enemy.axis === "x" ? enemy.along : enemy.lane,
-    Math.abs(Math.sin(enemy.walkPhase * 2)) * 0.025,
-    enemy.axis === "x" ? enemy.lane : enemy.along,
-  );
-  enemy.group.rotation.y =
-    enemy.axis === "x"
-      ? enemy.direction > 0
-        ? -Math.PI / 2
-        : Math.PI / 2
-      : enemy.direction > 0
-        ? Math.PI
-        : 0;
-  for (let i = 0; i < 2; i++) {
-    const gait = getEnemyGait(enemy.walkPhase + i * Math.PI);
-    enemy.legs[i].rotation.x = gait.leg;
-    enemy.knees[i].rotation.x = gait.knee;
-    enemy.arms[i].rotation.x = gait.arm;
-  }
-  enemy.group.updateMatrixWorld(true);
-}
 function spawnEnemy() {
-  const group = new THREE.Group();
-  const body = new THREE.Mesh(enemyBodyGeometry, enemySuitMaterial);
-  body.position.y = 1.12;
-  group.add(body);
-
-  const pelvis = new THREE.Mesh(enemyPelvisGeometry, enemySuitMaterial);
-  pelvis.position.y = 0.77;
-  group.add(pelvis);
-  const chestPlate = new THREE.Mesh(enemyChestPlateGeometry, enemyArmorMaterial);
-  chestPlate.position.set(0, 1.23, -0.2);
-  group.add(chestPlate);
-  const chestLight = new THREE.Mesh(enemyChestLightGeometry, enemyDetailMaterial);
-  chestLight.position.set(0, 1.2, -0.27);
-  group.add(chestLight);
-
-  const neck = new THREE.Mesh(enemyNeckGeometry, enemyJointMaterial);
-  neck.position.y = 1.51;
-  group.add(neck);
-  const helmet = new THREE.Mesh(enemyHelmetGeometry, enemyArmorMaterial);
-  helmet.position.y = 1.69;
-  group.add(helmet);
-  const visor = new THREE.Mesh(enemyVisorGeometry, enemyVisorMaterial);
-  visor.position.set(0, 1.69, -0.2);
-  group.add(visor);
-
-  const arms = [];
-  const legs = [];
-  const knees = [];
-  for (const side of [-1, 1]) {
-    const arm = new THREE.Group();
-    arm.position.set(side * 0.31, 1.4, 0);
-    group.add(arm);
-    const shoulder = new THREE.Mesh(enemyJointGeometry, enemyArmorMaterial);
-    shoulder.scale.set(1.35, 1.1, 1.3);
-    shoulder.position.y = -0.04;
-    arm.add(shoulder);
-    const upperArm = new THREE.Mesh(enemyUpperArmGeometry, enemySuitMaterial);
-    upperArm.position.y = -0.19;
-    arm.add(upperArm);
-    const elbow = new THREE.Group();
-    elbow.position.y = -0.36;
-    arm.add(elbow);
-    const elbowJoint = new THREE.Mesh(enemyJointGeometry, enemyJointMaterial);
-    elbow.add(elbowJoint);
-    const forearm = new THREE.Mesh(enemyLowerArmGeometry, enemyArmorMaterial);
-    forearm.position.y = -0.15;
-    elbow.add(forearm);
-    const hand = new THREE.Mesh(enemyJointGeometry, enemySuitMaterial);
-    hand.scale.set(0.78, 0.8, 0.82);
-    hand.position.set(0, -0.31, -0.015);
-    elbow.add(hand);
-    arms.push(arm);
-
-    const leg = new THREE.Group();
-    leg.position.set(side * 0.14, 0.78, 0);
-    group.add(leg);
-    const thigh = new THREE.Mesh(enemyUpperLegGeometry, enemySuitMaterial);
-    thigh.position.y = -0.2;
-    leg.add(thigh);
-    const knee = new THREE.Group();
-    knee.position.y = -0.4;
-    leg.add(knee);
-    const kneePad = new THREE.Mesh(enemyJointGeometry, enemyArmorMaterial);
-    kneePad.scale.set(1.15, 0.95, 1.1);
-    knee.add(kneePad);
-    const shin = new THREE.Mesh(enemyLowerLegGeometry, enemyArmorMaterial);
-    shin.position.y = -0.18;
-    knee.add(shin);
-    const boot = new THREE.Mesh(enemyBootGeometry, enemyJointMaterial);
-    boot.position.set(0, -0.37, -0.06);
-    knee.add(boot);
-    legs.push(leg);
-    knees.push(knee);
-  }
-
-  const enemy = {
-    axis: random() < 0.5 ? "x" : "z",
-    lane: (Math.floor(random() * 9) - 4) * 48,
-    along: rand(-192, 192),
-    direction: random() < 0.5 ? -1 : 1,
-    speed: rand(1.4, 2.6),
-    walkPhase: rand(0, Math.PI * 2),
-    arms,
-    legs,
-    knees,
-    group,
-  };
-  group.userData.enemy = enemy;
-  syncEnemy(enemy);
-  scene.add(group);
-  enemies.push(enemy);
+  enemies.push(createEnemy(scene, camera, random, rand));
 }
 for (let i = 0; i < 20; i++) spawnEnemy();
 
@@ -571,14 +242,17 @@ const player = {
   velocity: new THREE.Vector3(),
   yaw: 0,
   pitch: 0,
+  health: 100,
+  maxHealth: 100,
+  invulnerability: 0,
 };
+const previousPosition = new THREE.Vector3();
 const EYE_HEIGHT = 1.62;
 const MAX_HOOK_DISTANCE = 120;
-const COLLISION_RADIUS = 0.48;
 const MAX_ALTITUDE = 145;
 const WEAPONS = [
-  { name: "SNIPER", range: 220, fireInterval: 550, automatic: false },
-  { name: "ASSAULT MG", range: 90, fireInterval: 95, automatic: true },
+  { name: "SNIPER", range: 220, fireInterval: 550, automatic: false, damage: 100 },
+  { name: "ASSAULT MG", range: 90, fireInterval: 95, automatic: true, damage: 25 },
 ];
 const weaponName = document.querySelector("#weapon-name");
 let weaponIndex = 0;
@@ -617,6 +291,8 @@ for (let i = 0; i < 2; i++) {
   cableLines.push(line);
 }
 
+updatePlayerHealth();
+
 function setGameUi() {
   const locked = document.pointerLockElement === canvas;
   startScreen.hidden = hasStarted;
@@ -644,11 +320,48 @@ function showLockError(message) {
 }
 
 let noticeTimer;
+let damageFlashTimer = 0;
 function showNotice(message) {
   notice.textContent = message;
   notice.classList.add("visible");
   clearTimeout(noticeTimer);
   noticeTimer = setTimeout(() => notice.classList.remove("visible"), 1700);
+}
+
+function updatePlayerHealth() {
+  playerHealthValue.textContent = String(Math.ceil(player.health));
+  playerHealthBar.style.width = `${player.health}%`;
+  playerHealthBar.classList.toggle("low", player.health <= 30);
+}
+
+function damagePlayer(damage) {
+  if (player.invulnerability > 0) return;
+  player.health = Math.max(0, player.health - damage);
+  updatePlayerHealth();
+  damageOverlay.classList.remove("active");
+  void damageOverlay.offsetWidth;
+  damageOverlay.classList.add("active");
+  damageFlashTimer = 0.24;
+  if (player.health > 0) return;
+
+  player.health = player.maxHealth;
+  player.position.set(0, 0, 0);
+  player.velocity.set(0, 0, 0);
+  player.invulnerability = 3;
+  tethers.fill(null);
+  updatePlayerHealth();
+  showNotice("撃破されました — 渋谷スクランブルで再出撃");
+}
+
+function showEnemyShot(enemy, hit) {
+  const positions = enemy.shotLine.geometry.attributes.position;
+  positions.setXYZ(0, enemy.group.position.x, 1.3, enemy.group.position.z);
+  positions.setXYZ(1, player.position.x, player.position.y + EYE_HEIGHT, player.position.z);
+  positions.needsUpdate = true;
+  enemy.shotLine.geometry.computeBoundingSphere();
+  enemy.shotLine.material.color.set(hit ? "#ff625f" : "#ffc46b");
+  enemy.shotLine.visible = true;
+  enemy.shotTimer = 0.12;
 }
 
 function aimAtWall(maxDistance = MAX_HOOK_DISTANCE) {
@@ -701,8 +414,18 @@ function fireGun(now = performance.now()) {
     showNotice("建物に遮られています");
     return;
   }
-  scene.remove(hit.enemy.group);
-  enemies.splice(enemies.indexOf(hit.enemy), 1);
+  const enemy = hit.enemy;
+  enemy.health = Math.max(0, enemy.health - weapon.damage);
+  updateEnemyHealthBar(enemy);
+  if (enemy.health > 0) {
+    showNotice(`敵に命中 — 残り HP ${enemy.health}`);
+    return;
+  }
+  scene.remove(enemy.group, enemy.healthBar, enemy.shotLine);
+  enemy.shotLine.geometry.dispose();
+  enemy.shotLine.material.dispose();
+  enemy.healthFillMaterial.dispose();
+  enemies.splice(enemies.indexOf(enemy), 1);
   kills++;
   enemyCountValue.textContent = String(enemies.length);
   killCountValue.textContent = String(kills);
@@ -716,55 +439,42 @@ function switchWeapon() {
   showNotice(`武器切り替え — ${WEAPONS[weaponIndex].name}`);
 }
 
+function chaseEnemy(enemy, dt) {
+  const x = enemy.axis === "x" ? enemy.along : enemy.lane;
+  const z = enemy.axis === "x" ? enemy.lane : enemy.along;
+  const dx = player.position.x - x;
+  const dz = player.position.z - z;
+  const distance = Math.hypot(dx, dz);
+  if (distance <= 4.5) return;
+  const step = Math.min(distance - 4.5, 4.8 * dt);
+  const nextX = x + (dx / distance) * step;
+  const nextZ = z + (dz / distance) * step;
+  enemy.axis = Math.abs(dx) >= Math.abs(dz) ? "x" : "z";
+  enemy.direction = Math.sign(enemy.axis === "x" ? dx : dz) || enemy.direction;
+  enemy.along = enemy.axis === "x" ? nextX : nextZ;
+  enemy.lane = enemy.axis === "x" ? nextZ : nextX;
+}
+
 function updateEnemies(dt) {
   respawnTimer -= dt;
+  player.invulnerability = Math.max(0, player.invulnerability - dt);
+  damageFlashTimer = Math.max(0, damageFlashTimer - dt);
+  if (damageFlashTimer === 0) damageOverlay.classList.remove("active");
   if (enemies.length < 20 && respawnTimer <= 0) {
     spawnEnemy();
     respawnTimer = 1.8;
   }
   for (const enemy of enemies) {
-    updateEnemy(enemy, dt, random);
-    enemy.walkPhase += dt * enemy.speed * 2.5;
-    syncEnemy(enemy);
-  }
-}
-
-function resolveBuildings(previousY) {
-  for (const building of buildings) {
-    const minX = building.x - building.width / 2;
-    const maxX = building.x + building.width / 2;
-    const minZ = building.z - building.depth / 2;
-    const maxZ = building.z + building.depth / 2;
-
-    if (
-      previousY >= building.height &&
-      player.position.y < building.height &&
-      player.velocity.y <= 0 &&
-      player.position.x > minX &&
-      player.position.x < maxX &&
-      player.position.z > minZ &&
-      player.position.z < maxZ
-    ) {
-      player.position.y = building.height;
-      player.velocity.y = 0;
-      return;
-    }
-    if (player.position.y >= building.height || player.position.y + 1.9 <= 0) continue;
-
-    const overlapX =
-      building.width / 2 + COLLISION_RADIUS - Math.abs(player.position.x - building.x);
-    const overlapZ =
-      building.depth / 2 + COLLISION_RADIUS - Math.abs(player.position.z - building.z);
-    if (overlapX <= 0 || overlapZ <= 0) continue;
-
-    if (overlapX < overlapZ) {
-      const side = player.position.x < building.x ? -1 : 1;
-      player.position.x = building.x + side * (building.width / 2 + COLLISION_RADIUS);
-      player.velocity.x = 0;
-    } else {
-      const side = player.position.z < building.z ? -1 : 1;
-      player.position.z = building.z + side * (building.depth / 2 + COLLISION_RADIUS);
-      player.velocity.z = 0;
+    const shot = updateEnemyAI(enemy, dt, player.position, buildings, random);
+    if (enemy.canSeePlayer) chaseEnemy(enemy, dt);
+    else updateEnemy(enemy, dt, random);
+    enemy.walkPhase += dt * (enemy.canSeePlayer ? 7 : enemy.speed * 2.5);
+    enemy.shotTimer = Math.max(0, enemy.shotTimer - dt);
+    enemy.shotLine.visible = enemy.shotTimer > 0;
+    syncEnemy(enemy, camera);
+    if (shot) {
+      showEnemyShot(enemy, shot.hit);
+      if (shot.hit) damagePlayer(12);
     }
   }
 }
@@ -814,6 +524,7 @@ function updateFlight(dt) {
   }
 
   const previousY = player.position.y;
+  previousPosition.copy(player.position);
   player.position.addScaledVector(player.velocity, dt);
   for (let i = 0; i < tethers.length; i++) {
     if (!tethers[i]) continue;
@@ -821,7 +532,13 @@ function updateFlight(dt) {
     tetherConstraintAnchor.y -= EYE_HEIGHT;
     constrainRope(player.position, player.velocity, tetherConstraintAnchor, ropeLengths[i]);
   }
-  resolveBuildings(previousY);
+  resolveBuildingCollision(
+    player.position,
+    previousPosition,
+    player.velocity,
+    buildings,
+    previousY,
+  );
 
   if (player.position.y < 0) {
     player.position.y = 0;

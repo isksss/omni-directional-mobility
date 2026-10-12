@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { constrainRope } from "./flight.js";
+import { updateEnemy } from "./enemies.js";
 import "./style.css";
 
 const canvas = document.querySelector("#game");
@@ -10,6 +11,8 @@ const pauseError = document.querySelector("#pause-error");
 const notice = document.querySelector("#notice");
 const reticle = document.querySelector("#reticle");
 const hookStatus = document.querySelector("#hook-status");
+const enemyCountValue = document.querySelector("#enemy-count");
+const killCountValue = document.querySelector("#kill-count");
 const speedValue = document.querySelector("#speed-value");
 const altitudeValue = document.querySelector("#altitude-value");
 const sensitivityInputs = [...document.querySelectorAll("[data-vertical-sensitivity]")];
@@ -247,6 +250,65 @@ for (let chunk = 0; chunk < litWindows.length; chunk++) {
   }
 }
 
+const enemies = [];
+const enemyBodyGeometry = new THREE.CapsuleGeometry(0.3, 0.78, 3, 8);
+const enemyHeadGeometry = new THREE.SphereGeometry(0.22, 8, 6);
+const enemyArmGeometry = new THREE.CylinderGeometry(0.1, 0.12, 0.7, 6);
+const enemyMaterial = new THREE.MeshStandardMaterial({
+  color: "#dc5962",
+  emissive: "#5c1019",
+  emissiveIntensity: 0.8,
+  roughness: 0.8,
+});
+const enemyHeadMaterial = new THREE.MeshStandardMaterial({
+  color: "#f0bd95",
+  roughness: 0.9,
+});
+function syncEnemy(enemy) {
+  enemy.group.position.set(
+    enemy.axis === "x" ? enemy.along : enemy.lane,
+    0,
+    enemy.axis === "x" ? enemy.lane : enemy.along,
+  );
+  enemy.group.rotation.y =
+    enemy.axis === "x"
+      ? enemy.direction > 0
+        ? -Math.PI / 2
+        : Math.PI / 2
+      : enemy.direction > 0
+        ? Math.PI
+        : 0;
+  enemy.group.updateMatrixWorld(true);
+}
+function spawnEnemy() {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(enemyBodyGeometry, enemyMaterial);
+  body.position.y = 0.72;
+  const head = new THREE.Mesh(enemyHeadGeometry, enemyHeadMaterial);
+  head.position.y = 1.58;
+  group.add(body, head);
+  for (const side of [-1, 1]) {
+    const arm = new THREE.Mesh(enemyArmGeometry, enemyMaterial);
+    arm.position.set(side * 0.39, 1.02, 0);
+    arm.rotation.z = side * -0.16;
+    group.add(arm);
+  }
+
+  const enemy = {
+    axis: random() < 0.5 ? "x" : "z",
+    lane: (Math.floor(random() * 9) - 4) * 48,
+    along: rand(-192, 192),
+    direction: random() < 0.5 ? -1 : 1,
+    speed: rand(1.4, 2.6),
+    group,
+  };
+  group.userData.enemy = enemy;
+  syncEnemy(enemy);
+  scene.add(group);
+  enemies.push(enemy);
+}
+for (let i = 0; i < 20; i++) spawnEnemy();
+
 const player = {
   position: new THREE.Vector3(0, 0, 0),
   velocity: new THREE.Vector3(),
@@ -257,11 +319,15 @@ const EYE_HEIGHT = 1.62;
 const MAX_HOOK_DISTANCE = 120;
 const COLLISION_RADIUS = 0.48;
 const MAX_ALTITUDE = 145;
-let tether = null;
-let ropeLength = 0;
+const tethers = [null, null];
+const ropeLengths = [0, 0];
 let currentTarget = null;
+let scoped = false;
+let kills = 0;
+let respawnTimer = 0;
 let hasStarted = false;
 const keys = new Set();
+const reelKeys = new Set();
 const raycaster = new THREE.Raycaster();
 raycaster.far = MAX_HOOK_DISTANCE;
 const screenCenter = new THREE.Vector2(0, 0);
@@ -326,18 +392,64 @@ function aimAtWall() {
   const hit = raycaster
     .intersectObjects(facadeMeshes, false)
     .find(({ point }) => point.distanceTo(player.position) <= MAX_HOOK_DISTANCE);
-  return hit ? { position: hit.point.clone() } : null;
+  return hit ? { position: hit.point.clone(), distance: hit.distance } : null;
 }
 
-function beginTether() {
+function aimAtEnemy() {
+  raycaster.setFromCamera(screenCenter, camera);
+  const hit = raycaster.intersectObjects(
+    enemies.map((enemy) => enemy.group),
+    true,
+  )[0];
+  if (!hit) return null;
+  let target = hit.object;
+  while (target && !target.userData.enemy) target = target.parent;
+  return target ? { enemy: target.userData.enemy, distance: hit.distance } : null;
+}
+
+function beginTether(index) {
+  if (tethers[index]) {
+    tethers[index] = null;
+    showNotice(`${index ? "右" : "左"}フックを解除`);
+    return;
+  }
   currentTarget = aimAtWall();
   if (!currentTarget) {
     showNotice("建物の壁に照準を合わせてください");
     return;
   }
-  tether = currentTarget;
-  ropeLength = Math.max(7, camera.position.distanceTo(tether.position));
-  showNotice("ワイヤー接続 — SPACE で巻き取り");
+  tethers[index] = currentTarget;
+  ropeLengths[index] = Math.max(7, camera.position.distanceTo(currentTarget.position));
+  showNotice(`${index ? "右" : "左"}フック接続 — Shift+Q/E で巻き取り`);
+}
+
+function fireGun() {
+  camera.updateMatrixWorld();
+  const hit = aimAtEnemy();
+  if (!hit) return;
+  const wall = aimAtWall();
+  if (wall && wall.distance < hit.distance) {
+    showNotice("建物に遮られています");
+    return;
+  }
+  scene.remove(hit.enemy.group);
+  enemies.splice(enemies.indexOf(hit.enemy), 1);
+  kills++;
+  enemyCountValue.textContent = String(enemies.length);
+  killCountValue.textContent = String(kills);
+  showNotice(`敵を撃破 — ${kills} KILLS`);
+}
+
+function updateEnemies(dt) {
+  respawnTimer -= dt;
+  if (enemies.length < 20 && respawnTimer <= 0) {
+    spawnEnemy();
+    respawnTimer = 1.8;
+  }
+  for (const enemy of enemies) {
+    updateEnemy(enemy, dt, random);
+    syncEnemy(enemy);
+  }
 }
 
 function resolveBuildings(previousY) {
@@ -395,22 +507,27 @@ function updateFlight(dt) {
   if (moveDirection.lengthSq() > 0) {
     player.velocity.addScaledVector(moveDirection, (grounded ? 25 : 15) * (boost ? 1.8 : 1) * dt);
   }
-  if (tether) {
-    if (keys.has("Space")) ropeLength = Math.max(7, ropeLength - 15 * dt);
+  for (let i = 0; i < tethers.length; i++) {
+    const tether = tethers[i];
+    if (!tether) continue;
+    if (keys.has("Space") || reelKeys.has(i ? "KeyE" : "KeyQ")) {
+      ropeLengths[i] = Math.max(7, ropeLengths[i] - 15 * dt);
+    }
     towardAnchor.subVectors(tether.position, player.position);
     towardAnchor.y -= EYE_HEIGHT;
     const distance = towardAnchor.length();
     if (distance > 0) {
-      const tension = THREE.MathUtils.clamp((distance - ropeLength + 4) / 4, 0, 1);
+      const tension = THREE.MathUtils.clamp((distance - ropeLengths[i] + 4) / 4, 0, 1);
       player.velocity.addScaledVector(towardAnchor, (18 * tension * dt) / distance);
     }
   }
   player.velocity.y -= 21 * dt;
 
-  const drag = tether ? Math.exp(-0.06 * dt) : Math.exp(-(grounded ? 3.8 : 0.16) * dt);
+  const hasTether = tethers.some(Boolean);
+  const drag = hasTether ? Math.exp(-0.06 * dt) : Math.exp(-(grounded ? 3.8 : 0.16) * dt);
   player.velocity.x *= drag;
   player.velocity.z *= drag;
-  const maxSpeed = boost ? 42 : tether ? 32 : grounded ? 13 : 25;
+  const maxSpeed = boost ? 42 : hasTether ? 32 : grounded ? 13 : 25;
   const horizontalSpeed = Math.hypot(player.velocity.x, player.velocity.z);
   if (horizontalSpeed > maxSpeed) {
     const scale = maxSpeed / horizontalSpeed;
@@ -420,10 +537,11 @@ function updateFlight(dt) {
 
   const previousY = player.position.y;
   player.position.addScaledVector(player.velocity, dt);
-  if (tether) {
-    tetherConstraintAnchor.copy(tether.position);
+  for (let i = 0; i < tethers.length; i++) {
+    if (!tethers[i]) continue;
+    tetherConstraintAnchor.copy(tethers[i].position);
     tetherConstraintAnchor.y -= EYE_HEIGHT;
-    constrainRope(player.position, player.velocity, tetherConstraintAnchor, ropeLength);
+    constrainRope(player.position, player.velocity, tetherConstraintAnchor, ropeLengths[i]);
   }
   resolveBuildings(previousY);
 
@@ -444,42 +562,52 @@ function updateFlight(dt) {
   }
 }
 
-function updateCamera() {
+function updateCamera(dt = 1) {
   camera.position.copy(player.position);
   camera.position.y += EYE_HEIGHT;
   camera.rotation.set(player.pitch, player.yaw, 0);
+  camera.fov = THREE.MathUtils.damp(camera.fov, scoped ? 22 : 62, 12, dt);
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
 }
 
 function updateTargetAndHud(time) {
   currentTarget = aimAtWall();
-  reticle.classList.toggle("ready", !!currentTarget && !tether);
-  reticle.classList.toggle("attached", !!tether);
-  hookStatus.classList.toggle("ready", !!currentTarget && !tether);
-  hookStatus.classList.toggle("attached", !!tether);
-  hookStatus.lastChild.textContent = tether ? " ATTACHED" : currentTarget ? " LOCKED" : " SCANNING";
+  const enemyTarget = aimAtEnemy();
+  const hasTether = tethers.some(Boolean);
+  reticle.classList.toggle("ready", !!enemyTarget);
+  reticle.classList.toggle("enemy-target", !!enemyTarget);
+  reticle.classList.toggle("attached", hasTether);
+  hookStatus.classList.toggle("ready", !!currentTarget);
+  hookStatus.classList.toggle("attached", hasTether);
+  hookStatus.lastChild.textContent = tethers
+    .map(
+      (tether, index) => `${index ? "R" : "L"} ${tether ? "LINK" : currentTarget ? "READY" : "—"}`,
+    )
+    .join(" · ");
 
-  if (tether) {
-    for (let i = 0; i < cableLines.length; i++) {
-      ropeStart
-        .set(i === 0 ? -0.2 : 0.2, -0.16, -0.42)
-        .applyQuaternion(camera.quaternion)
-        .add(camera.position);
-      const positions = cableLines[i].geometry.attributes.position;
-      positions.setXYZ(0, ropeStart.x, ropeStart.y, ropeStart.z);
-      positions.setXYZ(1, tether.position.x, tether.position.y, tether.position.z);
-      positions.needsUpdate = true;
-      cableLines[i].geometry.computeBoundingSphere();
-      cableLines[i].visible = true;
+  for (let i = 0; i < cableLines.length; i++) {
+    const tether = tethers[i];
+    if (!tether) {
+      cableLines[i].visible = false;
+      continue;
     }
-  } else {
-    cableLines.forEach((line) => {
-      line.visible = false;
-    });
+    ropeStart
+      .set(i === 0 ? -0.2 : 0.2, -0.16, -0.42)
+      .applyQuaternion(camera.quaternion)
+      .add(camera.position);
+    const positions = cableLines[i].geometry.attributes.position;
+    positions.setXYZ(0, ropeStart.x, ropeStart.y, ropeStart.z);
+    positions.setXYZ(1, tether.position.x, tether.position.y, tether.position.z);
+    positions.needsUpdate = true;
+    cableLines[i].geometry.computeBoundingSphere();
+    cableLines[i].visible = true;
   }
 
   if (time - lastHudUpdate > 0.1) {
     speedValue.textContent = String(Math.round(player.velocity.length() * 3.6));
     altitudeValue.textContent = String(Math.round(player.position.y));
+    enemyCountValue.textContent = String(enemies.length);
     lastHudUpdate = time;
   }
 }
@@ -508,7 +636,8 @@ function frame(now) {
   const dt = Math.min((now - previousTime) * 0.001 || 0, 0.08);
   previousTime = now;
   updateFlight(dt);
-  updateCamera();
+  updateEnemies(dt);
+  updateCamera(dt);
   updateTargetAndHud(time);
   renderer.render(scene, camera);
 }
@@ -537,7 +666,13 @@ for (const button of [
 document.addEventListener("pointerlockchange", () => {
   if (document.pointerLockElement !== canvas) {
     keys.clear();
-    tether = null;
+    reelKeys.clear();
+    tethers.fill(null);
+    scoped = false;
+    hud.classList.remove("scoped");
+    cableLines.forEach((line) => {
+      line.visible = false;
+    });
     stopLoop();
   } else {
     pauseError.hidden = true;
@@ -559,26 +694,45 @@ document.addEventListener("mousemove", (event) => {
   );
 });
 
-canvas.addEventListener("click", (event) => {
-  if (event.button !== 0 || document.pointerLockElement !== canvas) return;
-  if (tether) tether = null;
-  else beginTether();
+canvas.addEventListener("mousedown", (event) => {
+  if (document.pointerLockElement !== canvas) return;
+  if (event.button === 0) fireGun();
+  if (event.button === 2) {
+    scoped = true;
+    hud.classList.add("scoped");
+  }
+});
+canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+window.addEventListener("mouseup", (event) => {
+  if (event.button === 2) {
+    scoped = false;
+    hud.classList.remove("scoped");
+  }
 });
 window.addEventListener("keydown", (event) => {
   if (event.target instanceof HTMLInputElement && event.target.type === "range") return;
   if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code))
     event.preventDefault();
   keys.add(event.code);
+  if (document.pointerLockElement === canvas && !event.repeat) {
+    if (event.code === "KeyQ" && event.key === "q") beginTether(0);
+    if (event.code === "KeyE" && event.key === "e") beginTether(1);
+    if (event.code === "KeyQ" && event.key === "Q") reelKeys.add(event.code);
+    if (event.code === "KeyE" && event.key === "E") reelKeys.add(event.code);
+  }
   if (
     event.code === "Space" &&
     !event.repeat &&
-    !tether &&
+    !tethers.some(Boolean) &&
     document.pointerLockElement === canvas &&
     player.position.y <= 0.03
   ) {
     player.velocity.y = 9.2;
   }
 });
-window.addEventListener("keyup", (event) => keys.delete(event.code));
+window.addEventListener("keyup", (event) => {
+  keys.delete(event.code);
+  reelKeys.delete(event.code);
+});
 
 setGameUi();

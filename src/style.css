@@ -366,6 +366,18 @@ kbd {
   align-items: flex-end;
   gap: 8px;
 }
+.enemy-readout {
+  color: rgba(245, 248, 246, 0.58);
+  font: 9px var(--mono);
+  letter-spacing: 0.1em;
+}
+.enemy-readout b {
+  color: #ff9c8f;
+  font-weight: 500;
+}
+.enemy-readout span {
+  color: rgba(245, 248, 246, 0.42);
+}
 .hook-status {
   font: 10px var(--mono);
   letter-spacing: 0.08em;
@@ -443,6 +455,33 @@ kbd {
 .reticle.attached {
   border-color: #83eaff;
   box-shadow: 0 0 14px rgba(131, 234, 255, 0.6);
+}
+.reticle.enemy-target {
+  border-color: #ff716b;
+  box-shadow: 0 0 14px rgba(255, 113, 107, 0.65);
+}
+.scope-overlay {
+  position: fixed;
+  z-index: 0;
+  top: 50%;
+  left: 50%;
+  width: min(70vmin, 720px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(216, 231, 216, 0.7);
+  border-radius: 50%;
+  background: radial-gradient(circle, transparent 58%, rgba(0, 0, 0, 0.2));
+  box-shadow:
+    0 0 0 9999px rgba(3, 7, 12, 0.78),
+    inset 0 0 30px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+.hud.scoped .scope-overlay {
+  opacity: 1;
+  visibility: visible;
 }
 .notice {
   position: absolute;
@@ -583,10 +622,12 @@ kbd {
     left: 50%;
     bottom: 47px;
     transform: translateX(-50%);
-    gap: 6px;
+    gap: 5px;
     width: max-content;
-    padding: 8px 9px;
-    font-size: 9px;
+    max-width: calc(100vw - 24px);
+    justify-content: center;
+    padding: 8px 7px;
+    font-size: 8px;
   }
   .tether-hint b {
     margin-left: 3px;

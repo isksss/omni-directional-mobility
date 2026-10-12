@@ -64,9 +64,7 @@ const random = (() => {
 const rand = (min, max) => min + random() * (max - min);
 const citySize = 460;
 const buildings = [];
-const anchors = [];
 const object = new THREE.Object3D();
-const anchorTransform = new THREE.Object3D();
 
 function groundRect(width, depth, x, z, y, material) {
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), material);
@@ -128,10 +126,9 @@ const facadeMaterials = ["#293441", "#303744", "#30333b", "#26353a", "#35333a"].
   (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.86, metalness: 0.08 }),
 );
 const facadeMatrices = facadeMaterials.map(() => []);
+const facadeMeshes = [];
 const roofMatrices = [];
 const antennaMatrices = [];
-const anchorMatrices = [];
-const ringMatrices = [];
 const unitBoxGeometry = new THREE.BoxGeometry(1, 1, 1);
 const roofMaterial = new THREE.MeshStandardMaterial({ color: "#454950", roughness: 0.9 });
 const antennaMaterial = new THREE.MeshStandardMaterial({
@@ -139,19 +136,6 @@ const antennaMaterial = new THREE.MeshStandardMaterial({
   metalness: 0.62,
   roughness: 0.42,
 });
-const anchorMaterial = new THREE.MeshStandardMaterial({
-  color: "#79efff",
-  emissive: "#21c8ff",
-  emissiveIntensity: 2.4,
-  roughness: 0.25,
-});
-const ringMaterial = new THREE.MeshBasicMaterial({
-  color: "#78ecff",
-  transparent: true,
-  opacity: 0.74,
-});
-const anchorGeometry = new THREE.SphereGeometry(0.36, 12, 8);
-const ringGeometry = new THREE.TorusGeometry(0.58, 0.035, 5, 18);
 const antennaGeometry = new THREE.CylinderGeometry(0.09, 0.14, 1, 5);
 const windowGeometry = new THREE.BoxGeometry(0.72, 1, 0.12);
 const litWindowMaterial = new THREE.MeshStandardMaterial({
@@ -227,16 +211,6 @@ for (let gx = -8; gx <= 7; gx++) {
         object.scale.set(1, antennaHeight, 1);
         object.updateMatrix();
         antennaMatrices.push(object.matrix.clone());
-        const position = new THREE.Vector3(ax, height + antennaHeight + 0.55, az);
-        object.position.copy(position);
-        object.rotation.set(0, 0, 0);
-        object.scale.setScalar(1);
-        object.updateMatrix();
-        anchorMatrices.push(object.matrix.clone());
-        object.rotation.x = Math.PI / 2;
-        object.updateMatrix();
-        ringMatrices.push(object.matrix.clone());
-        anchors.push({ position });
       }
     }
   }
@@ -249,6 +223,7 @@ for (const [mat, matrices] of facadeMaterials.map((material, index) => [
   const facades = new THREE.InstancedMesh(unitBoxGeometry, mat, matrices.length);
   matrices.forEach((matrix, index) => facades.setMatrixAt(index, matrix));
   facades.instanceMatrix.needsUpdate = true;
+  facadeMeshes.push(facades);
   scene.add(facades);
 }
 const roofs = new THREE.InstancedMesh(unitBoxGeometry, roofMaterial, roofMatrices.length);
@@ -259,19 +234,6 @@ const antennae = new THREE.InstancedMesh(antennaGeometry, antennaMaterial, anten
 antennaMatrices.forEach((matrix, index) => antennae.setMatrixAt(index, matrix));
 antennae.instanceMatrix.needsUpdate = true;
 scene.add(antennae);
-const anchorInstances = new THREE.InstancedMesh(
-  anchorGeometry,
-  anchorMaterial,
-  anchorMatrices.length,
-);
-anchorMatrices.forEach((matrix, index) => anchorInstances.setMatrixAt(index, matrix));
-anchorInstances.instanceMatrix.needsUpdate = true;
-anchorInstances.computeBoundingSphere();
-scene.add(anchorInstances);
-const anchorRings = new THREE.InstancedMesh(ringGeometry, ringMaterial, ringMatrices.length);
-ringMatrices.forEach((matrix, index) => anchorRings.setMatrixAt(index, matrix));
-anchorRings.instanceMatrix.needsUpdate = true;
-scene.add(anchorRings);
 for (let chunk = 0; chunk < litWindows.length; chunk++) {
   for (const [mat, matrices] of [
     [litWindowMaterial, litWindows[chunk]],
@@ -359,21 +321,18 @@ function showNotice(message) {
   noticeTimer = setTimeout(() => notice.classList.remove("visible"), 1700);
 }
 
-function aimAtAnchor() {
+function aimAtWall() {
   raycaster.setFromCamera(screenCenter, camera);
   const hit = raycaster
-    .intersectObject(anchorInstances, false)
-    .find(
-      ({ instanceId }) =>
-        anchors[instanceId]?.position.distanceTo(player.position) <= MAX_HOOK_DISTANCE,
-    );
-  return hit ? anchors[hit.instanceId] : null;
+    .intersectObjects(facadeMeshes, false)
+    .find(({ point }) => point.distanceTo(player.position) <= MAX_HOOK_DISTANCE);
+  return hit ? { position: hit.point.clone() } : null;
 }
 
 function beginTether() {
-  currentTarget = aimAtAnchor();
+  currentTarget = aimAtWall();
   if (!currentTarget) {
-    showNotice("アンカーに照準を合わせてください");
+    showNotice("建物の壁に照準を合わせてください");
     return;
   }
   tether = currentTarget;
@@ -492,28 +451,12 @@ function updateCamera() {
 }
 
 function updateTargetAndHud(time) {
-  currentTarget = aimAtAnchor();
+  currentTarget = aimAtWall();
   reticle.classList.toggle("ready", !!currentTarget && !tether);
   reticle.classList.toggle("attached", !!tether);
   hookStatus.classList.toggle("ready", !!currentTarget && !tether);
   hookStatus.classList.toggle("attached", !!tether);
   hookStatus.lastChild.textContent = tether ? " ATTACHED" : currentTarget ? " LOCKED" : " SCANNING";
-
-  anchors.forEach(({ position }, index) => {
-    const focus = anchors[index] === currentTarget || anchors[index] === tether;
-    const pulse = 1 + Math.sin(time * 3.5 + position.x * 0.07) * 0.07;
-    anchorTransform.position.copy(position);
-    anchorTransform.rotation.set(0, 0, 0);
-    anchorTransform.scale.setScalar(pulse * (focus ? 1.55 : 1));
-    anchorTransform.updateMatrix();
-    anchorInstances.setMatrixAt(index, anchorTransform.matrix);
-    anchorTransform.rotation.x = Math.PI / 2;
-    anchorTransform.scale.setScalar(pulse * (focus ? 1.35 : 1));
-    anchorTransform.updateMatrix();
-    anchorRings.setMatrixAt(index, anchorTransform.matrix);
-  });
-  anchorInstances.instanceMatrix.needsUpdate = true;
-  anchorRings.instanceMatrix.needsUpdate = true;
 
   if (tether) {
     for (let i = 0; i < cableLines.length; i++) {
@@ -616,13 +559,10 @@ document.addEventListener("mousemove", (event) => {
   );
 });
 
-canvas.addEventListener("mousedown", (event) => {
+canvas.addEventListener("click", (event) => {
   if (event.button !== 0 || document.pointerLockElement !== canvas) return;
-  beginTether();
-});
-window.addEventListener("mouseup", (event) => {
-  if (event.button !== 0) return;
-  tether = null;
+  if (tether) tether = null;
+  else beginTether();
 });
 window.addEventListener("keydown", (event) => {
   if (event.target instanceof HTMLInputElement && event.target.type === "range") return;

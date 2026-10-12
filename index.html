@@ -6,37 +6,34 @@
     <meta name="theme-color" content="#0b1019" />
     <meta
       name="description"
-      content="渋谷スクランブル交差点をモチーフにした街を探索し、敵と戦う一人称視点フリーフライトゲーム。"
+      content="渋谷の街で敵と戦い、弾薬と回復を集めながら縮小する安全エリアで生き残る、一人称視点PvEバトルロイヤル。"
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>OMNI — Vertical Mobility</title>
+    <title>OMNI — PvE Battle Royale</title>
   </head>
   <body>
-    <canvas
-      id="game"
-      aria-label="渋谷スクランブル交差点を舞台にした一人称視点3Dフライトゲーム"
-    ></canvas>
+    <canvas id="game" aria-label="渋谷を舞台にした一人称視点PvEバトルロイヤルゲーム"></canvas>
     <div id="damage-overlay" aria-hidden="true"></div>
 
     <header class="topbar" aria-label="ゲーム情報">
       <a class="brand" href="#" aria-label="OMNI ホーム">
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span><strong>OMNI</strong><small>VERTICAL MOBILITY</small></span>
+        <span><strong>OMNI</strong><small>PVE BATTLE ROYALE</small></span>
       </a>
       <div class="district"><span class="live-dot"></span> SHIBUYA CROSSING <b>TOKYO</b></div>
-      <div class="session-label">FREE ROAM <span>／</span> 渋谷スクランブル交差点</div>
+      <div class="session-label">PVE BATTLE ROYALE <span>／</span> 渋谷スクランブル交差点</div>
     </header>
 
     <main>
       <section id="start-screen" class="screen start-screen" aria-labelledby="intro-title">
         <div class="intro-card">
-          <p class="eyebrow"><span>01</span> — FIRST-PERSON FLIGHT</p>
-          <h1 id="intro-title">街を、<br /><em>縦横無尽に。</em></h1>
+          <p class="eyebrow"><span>01</span> — PVE BATTLE ROYALE</p>
+          <h1 id="intro-title">最後まで、<br /><em>生き残れ。</em></h1>
           <p class="intro-copy">
-            渋谷スクランブル交差点を駆け抜け、ビルの店内まで探索しよう。<br />索敵して襲ってくる敵を撃退しながら、ワイヤーで街を縦横無尽に飛び回れ。
+            渋谷に降り立った敵20人を倒して生還しよう。弾薬と回復パックを集め、縮小する安全エリアから逃げながら、ワイヤーで街を駆け抜けろ。
           </p>
           <button id="start-button" class="primary-button" type="button">
-            <span>FLIGHT START</span><span aria-hidden="true">↗</span>
+            <span>DROP IN</span><span aria-hidden="true">↗</span>
           </button>
           <div class="quick-controls" aria-label="基本操作">
             <span><kbd data-key-label="movement">W A S D</kbd> 移動・店内探索</span>
@@ -48,7 +45,8 @@
             <span><kbd data-key-label="jump">SPACE</kbd> ジャンプ／巻き取り</span>
             <span><kbd data-key-label="boost">SHIFT</kbd> ブースト</span>
             <span><kbd data-key-label="weaponSwitch">V</kbd> 武器切り替え</span>
-            <span><kbd>右クリック</kbd> 照準</span>
+            <span><kbd data-key-label="reload">R</kbd> リロード</span>
+            <span><kbd>右クリック</kbd> スコープ</span>
             <span><kbd>左クリック</kbd> 射撃</span>
           </div>
           <details class="key-settings" data-key-settings>
@@ -82,16 +80,16 @@
           </label>
         </div>
         <div class="start-footer">
-          <span>NO MISSIONS. JUST MOMENTUM.</span><span>DESKTOP · KEYBOARD + MOUSE</span>
+          <span>PVE SURVIVAL · LAST ONE STANDING</span><span>DESKTOP · KEYBOARD + MOUSE</span>
         </div>
       </section>
 
       <section id="pause-screen" class="screen pause-screen" aria-labelledby="pause-title" hidden>
         <div class="pause-card">
-          <p class="eyebrow"><span>PAUSED</span> — TAKE A BREATH</p>
-          <h2 id="pause-title">フライトを<br /><em>再開しますか？</em></h2>
+          <p class="eyebrow"><span>PAUSED</span> — SAFE ZONE IS CLOSING</p>
+          <h2 id="pause-title">マッチを<br /><em>再開しますか？</em></h2>
           <button id="resume-button" class="primary-button" type="button">
-            <span>RESUME FLIGHT</span><span aria-hidden="true">↗</span>
+            <span>RESUME MATCH</span><span aria-hidden="true">↗</span>
           </button>
           <details class="key-settings" data-key-settings>
             <summary>キー割り当て</summary>
@@ -127,9 +125,25 @@
         </div>
       </section>
 
-      <section id="hud" class="hud" aria-label="飛行情報" hidden>
+      <section
+        id="game-over-screen"
+        class="screen game-over-screen"
+        aria-labelledby="game-over-title"
+        hidden
+      >
+        <div class="pause-card game-over-card">
+          <p class="eyebrow"><span>ROUND COMPLETE</span> — PVE BATTLE ROYALE</p>
+          <h2 id="game-over-title">生還成功！</h2>
+          <p id="game-over-message" class="intro-copy"></p>
+          <button id="retry-button" class="primary-button" type="button">
+            <span>DROP IN AGAIN</span><span aria-hidden="true">↗</span>
+          </button>
+        </div>
+      </section>
+
+      <section id="hud" class="hud" aria-label="サバイバル情報" hidden>
         <div class="hud-top-left">
-          <div class="telemetry-label"><span class="live-dot"></span> FLIGHT TELEMETRY</div>
+          <div class="telemetry-label"><span class="live-dot"></span> SURVIVAL STATUS</div>
           <div class="altitude-readout"><span id="altitude-value">0</span><small> M</small></div>
           <div class="metric-caption">ALTITUDE <span>／</span> ABOVE STREET</div>
           <div class="player-vitals" aria-label="プレイヤー体力">
@@ -141,12 +155,17 @@
         </div>
         <div class="hud-top-right">
           <span class="enemy-readout"
-            >HOSTILES <b id="enemy-count">20</b>
+            >ENEMIES LEFT <b id="enemy-count">20</b>
             <span>／ KILLS <b id="kill-count">0</b></span></span
           >
           <span class="system-label">WEAPON / TETHER SYSTEM</span>
           <span id="weapon-name" class="weapon-name">SNIPER</span>
+          <span class="weapon-ammo"
+            ><b id="ammo-magazine">6</b> / <span id="ammo-reserve">12</span>
+            <small>ROUNDS</small></span
+          >
           <span id="hook-status" class="hook-status"><i></i> L — · R —</span>
+          <span id="zone-status" class="zone-status">SAFE ZONE SHRINKS IN 03:20</span>
         </div>
         <div id="reticle" class="reticle" aria-hidden="true"><span></span></div>
         <div class="scope-overlay" aria-hidden="true"></div>
@@ -166,12 +185,12 @@
           </div>
           <div class="key-hints">
             <kbd data-key-label="boost">SHIFT</kbd><span>BOOST</span>
-            <kbd data-key-label="weaponSwitch">V</kbd><span>WEAPON</span><kbd>ESC</kbd
-            ><span>PAUSE</span>
+            <kbd data-key-label="weaponSwitch">V</kbd><span>WEAPON</span>
+            <kbd data-key-label="reload">R</kbd><span>RELOAD</span><kbd>ESC</kbd><span>PAUSE</span>
           </div>
         </div>
       </section>
     </main>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

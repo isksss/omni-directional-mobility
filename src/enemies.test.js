@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getEnemyGait, updateEnemy, updateEnemyAI } from "./enemies.js";
+import { getEnemyGait, updateEnemy, updateEnemyAI } from "./enemies.ts";
 
 test("enemy gait swings the arms opposite the legs and bends the stepping knee", () => {
   assert.deepEqual(getEnemyGait(Math.PI / 2), { leg: 0.48, knee: 0.65, arm: -0.32 });
@@ -34,6 +34,7 @@ test("enemies acquire a visible player and fire with a cooldown", () => {
     { hit: true },
   );
   assert.equal(enemy.canSeePlayer, true);
+  assert.equal(enemy.aiming, true);
   assert.equal(
     updateEnemyAI(enemy, 0.2, player, [], () => 0),
     null,

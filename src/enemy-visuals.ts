@@ -1,5 +1,34 @@
 import * as THREE from "three";
-import { getEnemyGait } from "./enemies.js";
+import type { RandomSource } from "./game-types.ts";
+import { getEnemyGait } from "./enemies.ts";
+
+export interface EnemyActor {
+  axis: "x" | "z";
+  lane: number;
+  along: number;
+  direction: number;
+  speed: number;
+  walkPhase: number;
+  health: number;
+  maxHealth: number;
+  attackTimer: number;
+  alertTimer: number;
+  aiTimer?: number;
+  canSeePlayer: boolean;
+  aiming: boolean;
+  alerted: boolean;
+  arms: THREE.Group[];
+  elbows: THREE.Group[];
+  legs: THREE.Group[];
+  knees: THREE.Group[];
+  helmet: THREE.Mesh;
+  group: THREE.Group;
+  healthBar: THREE.Group;
+  healthFill: THREE.Mesh;
+  healthFillMaterial: THREE.MeshBasicMaterial;
+  shotLine: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+  shotTimer: number;
+}
 
 const bodyGeometry = new THREE.CylinderGeometry(0.22, 0.29, 0.64, 6);
 const pelvisGeometry = new THREE.BoxGeometry(0.4, 0.24, 0.28);
@@ -36,9 +65,24 @@ const jointMaterial = new THREE.MeshStandardMaterial({
   metalness: 0.65,
   roughness: 0.38,
 });
+const rifleMaterial = new THREE.MeshStandardMaterial({
+  color: "#161c20",
+  metalness: 0.72,
+  roughness: 0.34,
+});
+const scopeMaterial = new THREE.MeshStandardMaterial({
+  color: "#242b30",
+  metalness: 0.68,
+  roughness: 0.3,
+});
 const bootGeometry = new THREE.BoxGeometry(0.2, 0.12, 0.32);
 const chestPlateGeometry = new THREE.BoxGeometry(0.45, 0.31, 0.12);
 const chestLightGeometry = new THREE.BoxGeometry(0.24, 0.035, 0.025);
+const rifleReceiverGeometry = new THREE.BoxGeometry(0.18, 0.15, 0.58);
+const rifleStockGeometry = new THREE.BoxGeometry(0.15, 0.12, 0.3);
+const rifleBarrelGeometry = new THREE.CylinderGeometry(0.035, 0.045, 0.48, 6);
+const scopeGeometry = new THREE.CylinderGeometry(0.035, 0.035, 0.19, 6);
+const rifleGripGeometry = new THREE.BoxGeometry(0.1, 0.2, 0.12);
 const healthTrackGeometry = new THREE.PlaneGeometry(1.2, 0.13);
 const healthFillGeometry = new THREE.PlaneGeometry(1.04, 0.075);
 const healthTrackMaterial = new THREE.MeshBasicMaterial({
@@ -50,7 +94,13 @@ const healthTrackMaterial = new THREE.MeshBasicMaterial({
 const shotGeometry = new THREE.BufferGeometry();
 shotGeometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
 
-function addMesh(parent, geometry, material, position, scale) {
+function addMesh(
+  parent: THREE.Object3D,
+  geometry: THREE.BufferGeometry,
+  material: THREE.Material,
+  position: [number, number, number],
+  scale?: [number, number, number],
+): THREE.Mesh {
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(...position);
   if (scale) mesh.scale.set(...scale);
@@ -58,18 +108,36 @@ function addMesh(parent, geometry, material, position, scale) {
   return mesh;
 }
 
-export function createEnemy(scene, camera, random, rand) {
+export function createEnemy(
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+  random: RandomSource,
+  rand: (min: number, max: number) => number,
+): EnemyActor {
   const group = new THREE.Group();
   addMesh(group, bodyGeometry, suitMaterial, [0, 1.12, 0]);
   addMesh(group, pelvisGeometry, suitMaterial, [0, 0.77, 0]);
   addMesh(group, chestPlateGeometry, armorMaterial, [0, 1.23, -0.2]);
   addMesh(group, chestLightGeometry, detailMaterial, [0, 1.2, -0.27]);
   addMesh(group, neckGeometry, jointMaterial, [0, 1.51, 0]);
-  addMesh(group, helmetGeometry, armorMaterial, [0, 1.69, 0]);
+  const helmet = addMesh(group, helmetGeometry, armorMaterial, [0, 1.69, 0]);
   addMesh(group, visorGeometry, visorMaterial, [0, 1.69, -0.2]);
 
-  const arms = [];
-  const legs = [];
+  const rifle = new THREE.Group();
+  rifle.name = "enemy-rifle";
+  rifle.position.set(0, 1.35, -0.27);
+  addMesh(rifle, rifleReceiverGeometry, rifleMaterial, [0, 0, -0.16]);
+  addMesh(rifle, rifleStockGeometry, rifleMaterial, [0, 0.01, 0.23]);
+  const barrel = addMesh(rifle, rifleBarrelGeometry, rifleMaterial, [0, 0, -0.65]);
+  barrel.rotation.x = -Math.PI / 2;
+  const scope = addMesh(rifle, scopeGeometry, scopeMaterial, [0, 0.12, -0.19]);
+  scope.name = "enemy-scope";
+  addMesh(rifle, rifleGripGeometry, rifleMaterial, [0, -0.14, -0.12]);
+  group.add(rifle);
+
+  const arms: THREE.Group[] = [];
+  const elbows: THREE.Group[] = [];
+  const legs: THREE.Group[] = [];
   const knees = [];
   for (const side of [-1, 1]) {
     const arm = new THREE.Group();
@@ -80,6 +148,7 @@ export function createEnemy(scene, camera, random, rand) {
     const elbow = new THREE.Group();
     elbow.position.y = -0.36;
     arm.add(elbow);
+    elbows.push(elbow);
     addMesh(elbow, jointGeometry, jointMaterial, [0, 0, 0]);
     addMesh(elbow, lowerArmGeometry, armorMaterial, [0, -0.15, 0]);
     addMesh(elbow, jointGeometry, suitMaterial, [0, -0.31, -0.015], [0.78, 0.8, 0.82]);
@@ -121,7 +190,7 @@ export function createEnemy(scene, camera, random, rand) {
   scene.add(shotLine);
 
   const enemy = {
-    axis: random() < 0.5 ? "x" : "z",
+    axis: (random() < 0.5 ? "x" : "z") as "x" | "z",
     lane: (Math.floor(random() * 9) - 4) * 48,
     along: rand(-192, 192),
     direction: random() < 0.5 ? -1 : 1,
@@ -131,7 +200,12 @@ export function createEnemy(scene, camera, random, rand) {
     maxHealth: 100,
     attackTimer: random(),
     alertTimer: 0,
+    canSeePlayer: false,
+    aiming: false,
+    alerted: false,
+    helmet,
     arms,
+    elbows,
     legs,
     knees,
     group,
@@ -148,7 +222,7 @@ export function createEnemy(scene, camera, random, rand) {
   return enemy;
 }
 
-export function syncEnemy(enemy, camera) {
+export function syncEnemy(enemy: EnemyActor, camera: THREE.Camera): void {
   enemy.group.position.set(
     enemy.axis === "x" ? enemy.along : enemy.lane,
     Math.abs(Math.sin(enemy.walkPhase * 2)) * 0.025,
@@ -166,8 +240,11 @@ export function syncEnemy(enemy, camera) {
     const gait = getEnemyGait(enemy.walkPhase + i * Math.PI);
     enemy.legs[i].rotation.x = gait.leg;
     enemy.knees[i].rotation.x = gait.knee;
-    enemy.arms[i].rotation.x = gait.arm;
+    enemy.arms[i].rotation.x = (enemy.aiming ? 1.5 : 1.3) + gait.arm * 0.12;
+    enemy.arms[i].rotation.z = i === 0 ? 0.45 : -0.45;
+    enemy.elbows[i].rotation.x = enemy.aiming ? 0.35 : 0.45;
   }
+  enemy.helmet.rotation.x = enemy.aiming ? 0.18 : 0;
   enemy.group.updateMatrixWorld(true);
   enemy.healthBar.position.set(
     enemy.group.position.x,
@@ -178,7 +255,14 @@ export function syncEnemy(enemy, camera) {
   enemy.healthBar.visible = camera.position.distanceTo(enemy.group.position) < 90;
 }
 
-export function updateEnemyHealthBar(enemy) {
+export function removeEnemy(scene: THREE.Scene, enemy: EnemyActor): void {
+  scene.remove(enemy.group, enemy.healthBar, enemy.shotLine);
+  enemy.shotLine.geometry.dispose();
+  enemy.shotLine.material.dispose();
+  enemy.healthFillMaterial.dispose();
+}
+
+export function updateEnemyHealthBar(enemy: EnemyActor): void {
   const ratio = enemy.health / enemy.maxHealth;
   enemy.healthFill.scale.x = ratio;
   enemy.healthFill.position.x = -0.52 * (1 - ratio);

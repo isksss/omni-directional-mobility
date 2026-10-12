@@ -3,7 +3,7 @@
 ## プロジェクト概要
 
 - Three.js と Vite を使った、ブラウザで遊べる一人称視点の3Dフリーフライトゲームです。Cloudflare Workers に配信します。
-- `src/main.js` にゲーム本体、入力、描画、UIを置いています。飛行物理の処理は `src/flight.js`、そのテストは `src/flight.test.js` です。
+- `src/main.ts` がゲーム本体のエントリーポイントで、武器・バトルロイヤル進行・戦利品・設定・敵・街・飛行物理は機能別の TypeScript ファイルに分割しています。既存のユニットテストは `src/*.test.js`、新しいゲームロジックのテストは `src/*.test.ts` にあります。
 - `index.html` と `src/style.css` が画面構成とスタイルを担当します。
 
 ## 開発時の確認

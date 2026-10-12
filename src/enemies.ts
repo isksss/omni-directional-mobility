@@ -1,16 +1,26 @@
+import type { BuildingBounds, Position3, RandomSource } from "./game-types.ts";
+import type { EnemyActor } from "./enemy-visuals.ts";
+
 const ROAD_SPACING = 48;
 const ROAD_LIMIT = 192;
 const TURN_CHANCE = 0.32;
 const EPSILON = 1e-9;
 const ENEMY_VISION_RANGE = 78;
 const ENEMY_FIRE_RANGE = 46;
+export const ENEMY_DAMAGE = 10;
 
-export function getEnemyGait(phase) {
+export function getEnemyGait(phase: number) {
   const stride = Math.sin(phase);
   return { leg: stride * 0.48, knee: Math.max(0, stride) * 0.65, arm: -stride * 0.32 };
 }
 
-export function updateEnemyAI(enemy, dt, player, buildings, random = Math.random) {
+export function updateEnemyAI(
+  enemy: EnemyActor,
+  dt: number,
+  player: Position3,
+  buildings: BuildingBounds[],
+  random: RandomSource = Math.random,
+): { hit: boolean } | null {
   enemy.aiTimer = (enemy.aiTimer ?? 0) - dt;
   enemy.attackTimer = Math.max(0, (enemy.attackTimer ?? 0) - dt);
   if (enemy.aiTimer > 0) return null;
@@ -34,6 +44,7 @@ export function updateEnemyAI(enemy, dt, player, buildings, random = Math.random
     );
 
   enemy.canSeePlayer = canSee;
+  enemy.aiming = canSee && distance <= ENEMY_FIRE_RANGE;
   enemy.alerted = canSee || (enemy.alertTimer ?? 0) > 0;
   enemy.alertTimer = canSee ? 4 : Math.max(0, (enemy.alertTimer ?? 0) - 0.18);
   if (!canSee || distance > ENEMY_FIRE_RANGE || enemy.attackTimer > 0) return null;
@@ -42,7 +53,15 @@ export function updateEnemyAI(enemy, dt, player, buildings, random = Math.random
   return { hit: random() < Math.max(0.2, 0.82 - distance / 75) };
 }
 
-function blocksBuildingSight(x1, y1, z1, x2, y2, z2, building) {
+function blocksBuildingSight(
+  x1: number,
+  y1: number,
+  z1: number,
+  x2: number,
+  y2: number,
+  z2: number,
+  building: BuildingBounds,
+): boolean {
   const min = [building.x - building.width / 2, 0, building.z - building.depth / 2];
   const max = [building.x + building.width / 2, building.height, building.z + building.depth / 2];
   const start = [x1, y1, z1];
@@ -63,7 +82,7 @@ function blocksBuildingSight(x1, y1, z1, x2, y2, z2, building) {
   }
   if (exit < 0 || enter > 1) return false;
 
-  const isDoor = (t) => {
+  const isDoor = (t: number) => {
     const px = x1 + delta[0] * t;
     const py = y1 + delta[1] * t;
     const pz = z1 + delta[2] * t;
@@ -82,7 +101,11 @@ function blocksBuildingSight(x1, y1, z1, x2, y2, z2, building) {
   return false;
 }
 
-export function updateEnemy(enemy, dt, random = Math.random) {
+export function updateEnemy(
+  enemy: EnemyActor,
+  dt: number,
+  random: RandomSource = Math.random,
+): void {
   let remaining = enemy.speed * dt;
   while (remaining > EPSILON) {
     const boundary = enemy.direction > 0 ? ROAD_LIMIT : -ROAD_LIMIT;

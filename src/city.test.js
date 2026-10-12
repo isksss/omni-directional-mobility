@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
-import { createCity, resolveBuildingCollision } from "./city.js";
+import { createCity, resolveBuildingCollision } from "./city.ts";
 
 const building = {
   x: 0,

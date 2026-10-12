@@ -388,6 +388,18 @@ kbd {
   font-size: clamp(38px, 5vw, 57px);
   margin-bottom: 28px;
 }
+.game-over-screen {
+  z-index: 4;
+  justify-content: center;
+  background: rgba(7, 11, 19, 0.78);
+  backdrop-filter: blur(9px);
+}
+.game-over-card h2 {
+  margin-bottom: 18px;
+}
+.game-over-card .intro-copy {
+  margin: 0 0 25px;
+}
 .pause-hint {
   color: var(--muted);
   font-size: 11px;
@@ -508,6 +520,25 @@ kbd {
   color: var(--acid);
   font: 11px var(--mono);
   letter-spacing: 0.12em;
+}
+.weapon-ammo {
+  color: rgba(245, 248, 246, 0.75);
+  font: 12px var(--mono);
+  letter-spacing: 0.08em;
+}
+.weapon-ammo b {
+  color: #fff;
+  font-size: 17px;
+  font-weight: 500;
+}
+.weapon-ammo small {
+  color: rgba(245, 248, 246, 0.42);
+  font-size: 8px;
+}
+.zone-status {
+  color: #83eaff;
+  font: 9px var(--mono);
+  letter-spacing: 0.08em;
 }
 .hook-status i {
   width: 6px;

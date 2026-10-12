@@ -1,4 +1,11 @@
 import * as THREE from "three";
+import type { BuildingBounds, RandomSource } from "./game-types.ts";
+import { randomBetween } from "./game-utils.ts";
+
+export interface CityBuilding extends BuildingBounds {
+  entranceWidth: number;
+  entranceHeight: number;
+}
 
 const ROAD_SPACING = 48;
 const ENTRANCE_WIDTH = 2.8;
@@ -6,7 +13,16 @@ const ENTRANCE_HEIGHT = 2.7;
 const unitBox = new THREE.BoxGeometry(1, 1, 1);
 const transform = new THREE.Object3D();
 
-function addMatrix(target, x, y, z, width, height, depth, rotation = 0) {
+function addMatrix(
+  target: THREE.Matrix4[],
+  x: number,
+  y: number,
+  z: number,
+  width: number,
+  height: number,
+  depth: number,
+  rotation = 0,
+): void {
   transform.position.set(x, y, z);
   transform.rotation.set(0, rotation, 0);
   transform.scale.set(width, height, depth);
@@ -14,7 +30,12 @@ function addMatrix(target, x, y, z, width, height, depth, rotation = 0) {
   target.push(transform.matrix.clone());
 }
 
-function addInstances(scene, geometry, material, matrices) {
+function addInstances(
+  scene: THREE.Scene,
+  geometry: THREE.BufferGeometry,
+  material: THREE.Material | THREE.Material[],
+  matrices: THREE.Matrix4[],
+): THREE.InstancedMesh | null {
   if (!matrices.length) return null;
   const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
   matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
@@ -23,11 +44,12 @@ function addInstances(scene, geometry, material, matrices) {
   return mesh;
 }
 
-function billboardTexture(label, accent) {
+function billboardTexture(label: string, accent: string): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = 1024;
   canvas.height = 320;
   const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not create the city billboard canvas");
   const gradient = context.createLinearGradient(0, 0, 1024, 320);
   gradient.addColorStop(0, "#111827");
   gradient.addColorStop(1, "#242235");
@@ -46,24 +68,27 @@ function billboardTexture(label, accent) {
   return texture;
 }
 
-export function createCity(scene, random) {
-  const rand = (min, max) => min + random() * (max - min);
-  const buildings = [];
+export function createCity(
+  scene: THREE.Scene,
+  random: RandomSource,
+): { buildings: CityBuilding[]; facadeMeshes: THREE.InstancedMesh[] } {
+  const rand = (min: number, max: number) => randomBetween(random, min, max);
+  const buildings: CityBuilding[] = [];
   const facadeMaterials = ["#293441", "#303744", "#30333b", "#26353a", "#35333a"].map(
     (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.86, metalness: 0.08 }),
   );
-  const facadeMatrices = facadeMaterials.map(() => []);
-  const facadeMeshes = [];
-  const roofMatrices = [];
-  const antennaMatrices = [];
-  const litWindows = Array.from({ length: 16 }, () => []);
-  const darkWindows = Array.from({ length: 16 }, () => []);
-  const floorMatrices = [];
-  const counterMatrices = [];
-  const shelfMatrices = [];
-  const pillarMatrices = [];
-  const ceilingLightMatrices = [];
-  const awningMatrices = Array.from({ length: 4 }, () => []);
+  const facadeMatrices: THREE.Matrix4[][] = facadeMaterials.map(() => []);
+  const facadeMeshes: THREE.InstancedMesh[] = [];
+  const roofMatrices: THREE.Matrix4[] = [];
+  const antennaMatrices: THREE.Matrix4[] = [];
+  const litWindows: THREE.Matrix4[][] = Array.from({ length: 16 }, () => []);
+  const darkWindows: THREE.Matrix4[][] = Array.from({ length: 16 }, () => []);
+  const floorMatrices: THREE.Matrix4[] = [];
+  const counterMatrices: THREE.Matrix4[] = [];
+  const shelfMatrices: THREE.Matrix4[] = [];
+  const pillarMatrices: THREE.Matrix4[] = [];
+  const ceilingLightMatrices: THREE.Matrix4[] = [];
+  const awningMatrices: THREE.Matrix4[][] = Array.from({ length: 4 }, () => []);
   const awningMaterials = ["#e64f49", "#d7a83e", "#42a6a0", "#596da7"].map(
     (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.7 }),
   );
@@ -101,7 +126,14 @@ export function createCity(scene, random) {
   });
   const interiorLightMaterial = new THREE.MeshBasicMaterial({ color: "#ffe2a5" });
 
-  function addWindow(x, y, z, rotation, lit, chunk) {
+  function addWindow(
+    x: number,
+    y: number,
+    z: number,
+    rotation: number,
+    lit: boolean,
+    chunk: number,
+  ): void {
     addMatrix((lit ? litWindows : darkWindows)[chunk], x, y, z, 1, 1, 1, rotation);
   }
 
@@ -228,7 +260,7 @@ export function createCity(scene, random) {
   }
 
   // Give the four storefronts closest to the crossing distinctive, readable skyline signs.
-  const billboards = [
+  const billboards: [string, string, number, number][] = [
     ["QFRONT", "#e55b9b", 1, -1],
     ["SHIBUYA 109", "#d7fa73", -1, -1],
     ["TOKYU", "#f0a343", 1, 1],
@@ -300,7 +332,14 @@ export function createCity(scene, random) {
   crossingSurface.position.y = -0.025;
   scene.add(crossingSurface);
 
-  function groundStrips(width, depth, axis, y, material, offset = 0) {
+  function groundStrips(
+    width: number,
+    depth: number,
+    axis: "x" | "z",
+    y: number,
+    material: THREE.Material,
+    offset = 0,
+  ): void {
     const strips = new THREE.InstancedMesh(new THREE.PlaneGeometry(width, depth), material, 9);
     for (let i = -4; i <= 4; i++) {
       transform.position.set(
@@ -322,7 +361,7 @@ export function createCity(scene, random) {
     groundStrips(1.7, 460, "z", 0.013, sidewalkMaterial, side * 5.1);
   }
 
-  const roadDashes = [];
+  const roadDashes: THREE.Matrix4[] = [];
   for (let road = -4; road <= 4; road++) {
     for (let at = -220; at <= 220; at += 12) {
       addMatrix(roadDashes, at, 0.027, road * ROAD_SPACING, 6, 0.025, 0.18);
@@ -332,8 +371,8 @@ export function createCity(scene, random) {
   addInstances(scene, unitBox, fadedMarking, roadDashes);
 
   // Four zebra crossings and stop bars turn the open central plaza into a scramble crossing.
-  const crosswalkMatrices = [];
-  const stopLineMatrices = [];
+  const crosswalkMatrices: THREE.Matrix4[] = [];
+  const stopLineMatrices: THREE.Matrix4[] = [];
   for (const side of [-1, 1]) {
     for (let stripe = -8; stripe <= 8; stripe++) {
       const offset = stripe * 0.92;
@@ -347,15 +386,15 @@ export function createCity(scene, random) {
   addInstances(scene, unitBox, markingMaterial, stopLineMatrices);
 
   // Curbs, trees, lamps and the signal poles are instanced to keep the dense district light to render.
-  const curbMatrices = [];
-  const treeTrunks = [];
-  const treeCrowns = [];
-  const lampPosts = [];
-  const lampArms = [];
-  const lampHeads = [];
-  const trafficPoles = [];
-  const trafficHeads = [];
-  const signalLenses = [[], [], []];
+  const curbMatrices: THREE.Matrix4[] = [];
+  const treeTrunks: THREE.Matrix4[] = [];
+  const treeCrowns: THREE.Matrix4[] = [];
+  const lampPosts: THREE.Matrix4[] = [];
+  const lampArms: THREE.Matrix4[] = [];
+  const lampHeads: THREE.Matrix4[] = [];
+  const trafficPoles: THREE.Matrix4[] = [];
+  const trafficHeads: THREE.Matrix4[] = [];
+  const signalLenses: THREE.Matrix4[][] = [[], [], []];
   for (let roadX = -4; roadX <= 4; roadX++) {
     for (let roadZ = -4; roadZ <= 4; roadZ++) {
       const x = roadX * ROAD_SPACING;
@@ -386,7 +425,7 @@ export function createCity(scene, random) {
     for (let segment = -4; segment < 4; segment++) {
       const along = segment * ROAD_SPACING + ROAD_SPACING / 2;
       for (const side of [-1, 1]) {
-        const positions = [
+        const positions: [number, number, number][] = [
           [along, side * 5.1, 0],
           [side * 5.1, along, 0],
         ];
@@ -509,12 +548,12 @@ export function createCity(scene, random) {
 }
 
 export function resolveBuildingCollision(
-  position,
-  previousPosition,
-  velocity,
-  buildings,
-  previousY,
-) {
+  position: THREE.Vector3,
+  previousPosition: THREE.Vector3,
+  velocity: THREE.Vector3,
+  buildings: CityBuilding[],
+  previousY: number,
+): void {
   for (const building of buildings) {
     const minX = building.x - building.width / 2;
     const maxX = building.x + building.width / 2;

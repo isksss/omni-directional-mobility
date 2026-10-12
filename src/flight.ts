@@ -1,4 +1,11 @@
-export function constrainRope(position, velocity, anchor, length) {
+import type * as THREE from "three";
+
+export function constrainRope(
+  position: THREE.Vector3,
+  velocity: THREE.Vector3,
+  anchor: THREE.Vector3,
+  length: number,
+): boolean {
   const dx = position.x - anchor.x;
   const dy = position.y - anchor.y;
   const dz = position.z - anchor.z;
@@ -12,6 +19,12 @@ export function constrainRope(position, velocity, anchor, length) {
   position.set(anchor.x + nx * length, anchor.y + ny * length, anchor.z + nz * length);
 
   const outwardSpeed = velocity.x * nx + velocity.y * ny + velocity.z * nz;
-  if (outwardSpeed > 0) velocity.addScaledVector({ x: nx, y: ny, z: nz }, -outwardSpeed);
+  if (outwardSpeed > 0) {
+    velocity.set(
+      velocity.x - nx * outwardSpeed,
+      velocity.y - ny * outwardSpeed,
+      velocity.z - nz * outwardSpeed,
+    );
+  }
   return true;
 }

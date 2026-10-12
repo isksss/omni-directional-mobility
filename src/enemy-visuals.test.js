@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
-import { createEnemy, updateEnemyHealthBar } from "./enemy-visuals.js";
+import { createEnemy, syncEnemy, updateEnemyHealthBar } from "./enemy-visuals.ts";
 
 test("enemy visuals expose a health gauge that follows its hit points", () => {
   const scene = new THREE.Scene();
@@ -14,6 +14,16 @@ test("enemy visuals expose a health gauge that follows its hit points", () => {
   );
 
   assert.equal(enemy.group.userData.enemy, enemy);
+  assert.equal(
+    enemy.group.getObjectByName("enemy-rifle")?.getObjectByName("enemy-scope")?.visible,
+    true,
+  );
+  enemy.aiming = true;
+  syncEnemy(enemy, new THREE.PerspectiveCamera());
+  assert.equal(enemy.helmet.rotation.x, 0.18);
+  assert.ok(enemy.arms[0].rotation.x > 1.4);
+  assert.equal(enemy.arms[0].rotation.z, 0.45);
+  assert.equal(enemy.elbows[0].rotation.x, 0.35);
   assert.equal(enemy.healthBar.parent, scene);
   enemy.health = 25;
   updateEnemyHealthBar(enemy);

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Vector3 } from "three";
-import { constrainRope } from "./flight.js";
+import { constrainRope } from "./flight.ts";
 
 test("a slack tether does not change position or velocity", () => {
   const position = new Vector3(3, 4, 0);

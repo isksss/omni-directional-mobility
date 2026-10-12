@@ -20,6 +20,7 @@ export interface CityBuilding extends BuildingBounds {
 
 const ENTRANCE_WIDTH = 2.8;
 const ENTRANCE_HEIGHT = 2.7;
+const COLLISION_RADIUS = 0.48;
 const unitBox = new THREE.BoxGeometry(1, 1, 1);
 const transform = new THREE.Object3D();
 
@@ -955,7 +956,7 @@ export function createCity(
   return { buildings, facadeMeshes, obstacles: vehicleObstacles };
 }
 
-export function resolveBuildingCollision(
+function resolveBuildingCollisionStep(
   position: THREE.Vector3,
   previousPosition: THREE.Vector3,
   velocity: THREE.Vector3,
@@ -1009,23 +1010,63 @@ export function resolveBuildingCollision(
     }
     if (isInside) continue;
 
-    const overlapX = building.width / 2 + 0.48 - Math.abs(position.x - building.x);
-    const overlapZ = building.depth / 2 + 0.48 - Math.abs(position.z - building.z);
+    const overlapX = building.width / 2 + COLLISION_RADIUS - Math.abs(position.x - building.x);
+    const overlapZ = building.depth / 2 + COLLISION_RADIUS - Math.abs(position.z - building.z);
     if (overlapX <= 0 || overlapZ <= 0) continue;
     const approachingDoor =
       Math.abs(position.x - building.x) < entranceWidth / 2 - 0.15 &&
-      position.z < minZ &&
-      position.z > minZ - 0.48;
+      position.z <= minZ &&
+      position.z > minZ - COLLISION_RADIUS;
     if (approachingDoor && position.y + 1.9 <= baseY + entranceHeight) continue;
 
     if (overlapX < overlapZ) {
       const side = position.x < building.x ? -1 : 1;
-      position.x = building.x + side * (building.width / 2 + 0.48);
+      position.x = building.x + side * (building.width / 2 + COLLISION_RADIUS);
       velocity.x = 0;
     } else {
       const side = position.z < building.z ? -1 : 1;
-      position.z = building.z + side * (building.depth / 2 + 0.48);
+      position.z = building.z + side * (building.depth / 2 + COLLISION_RADIUS);
       velocity.z = 0;
     }
   }
+}
+
+export function resolveBuildingCollision(
+  position: THREE.Vector3,
+  previousPosition: THREE.Vector3,
+  velocity: THREE.Vector3,
+  buildings: BuildingBounds[],
+  previousY: number,
+): void {
+  const dx = position.x - previousPosition.x;
+  const dy = position.y - previousPosition.y;
+  const dz = position.z - previousPosition.z;
+  const steps = Math.ceil(Math.hypot(dx, dz) / COLLISION_RADIUS);
+  if (steps <= 1) {
+    resolveBuildingCollisionStep(position, previousPosition, velocity, buildings, previousY);
+    return;
+  }
+
+  const current = new THREE.Vector3(previousPosition.x, previousPosition.y, previousPosition.z);
+  const candidate = new THREE.Vector3();
+  const previousStep = new THREE.Vector3();
+  let blockedX = false;
+  let blockedZ = false;
+
+  for (let step = 1; step <= steps; step++) {
+    const fraction = step / steps;
+    const desiredX = blockedX ? current.x : previousPosition.x + dx * fraction;
+    const desiredY = previousPosition.y + dy * fraction;
+    const desiredZ = blockedZ ? current.z : previousPosition.z + dz * fraction;
+    candidate.set(desiredX, desiredY, desiredZ);
+    previousStep.copy(current);
+    resolveBuildingCollisionStep(candidate, previousStep, velocity, buildings, current.y);
+    if (candidate.x !== desiredX) blockedX = true;
+    if (candidate.z !== desiredZ) blockedZ = true;
+    current.copy(candidate);
+  }
+
+  position.x = current.x;
+  position.y = current.y;
+  position.z = current.z;
 }

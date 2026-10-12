@@ -32,12 +32,21 @@ test("solid walls reject entry away from the doorway", () => {
   assert.deepEqual(result.velocity, { x: 0, y: 0, z: 0 });
 });
 
+test("fast movement cannot tunnel through a solid wall but can pass the doorway", () => {
+  const blocked = move({ x: 3, y: 0, z: -6 }, { x: 3, y: 0, z: 6 }, { x: 0, y: 0, z: 20 });
+  assert.ok(blocked.position.z < -5);
+  assert.equal(blocked.velocity.z, 0);
+
+  const entered = move({ x: 0, y: 0, z: -6 }, { x: 0, y: 0, z: -4 });
+  assert.equal(entered.position.z, -4);
+});
+
 test("parked vehicles block entry from the road", () => {
   const vehicle = { x: 0, z: 0, width: 4.2, depth: 1.9, height: 1.4 };
   const position = { x: -1.5, y: 0, z: 0 };
   const velocity = { x: 4, y: 0, z: 0 };
   resolveBuildingCollision(position, { x: -3, y: 0, z: 0 }, velocity, [vehicle], 0);
-  assert.equal(position.x, -3);
+  assert.ok(position.x < -2.1);
   assert.equal(velocity.x, 0);
 });
 

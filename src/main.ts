@@ -43,8 +43,8 @@ const gameOverScreen = getElement<HTMLElement>("#game-over-screen");
 const gameOverTitle = getElement<HTMLElement>("#game-over-title");
 const gameOverMessage = getElement<HTMLElement>("#game-over-message");
 const scene = new THREE.Scene();
-scene.background = new THREE.Color("#111827");
-scene.fog = new THREE.FogExp2("#111827", 0.0031);
+scene.background = new THREE.Color("#9aaab0");
+scene.fog = new THREE.FogExp2("#9aaab0", 0.0018);
 
 const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 600);
 camera.rotation.order = "YXZ";
@@ -56,14 +56,29 @@ const renderer = new THREE.WebGLRenderer({
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.18;
+renderer.toneMappingExposure = 1.08;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-scene.add(new THREE.HemisphereLight("#b9d7ff", "#27202a", 2.05));
-scene.add(new THREE.AmbientLight("#7d8fae", 0.62));
-const sunset = new THREE.DirectionalLight("#ffd0a0", 2.2);
-sunset.position.set(-90, 130, -40);
-scene.add(sunset);
-const skylineGlow = new THREE.PointLight("#ff956e", 38, 230, 2);
+scene.add(new THREE.HemisphereLight("#e0e9e9", "#4c4a43", 2.15));
+scene.add(new THREE.AmbientLight("#d0d0c8", 0.55));
+const sunlight = new THREE.DirectionalLight("#fff0d9", 3.1);
+sunlight.position.set(-90, 130, -40);
+sunlight.castShadow = true;
+sunlight.shadow.mapSize.set(1024, 1024);
+sunlight.shadow.bias = -0.00035;
+sunlight.shadow.normalBias = 0.025;
+sunlight.shadow.autoUpdate = false;
+const sunlightShadowCamera = sunlight.shadow.camera as THREE.OrthographicCamera;
+sunlightShadowCamera.left = -245;
+sunlightShadowCamera.right = 245;
+sunlightShadowCamera.top = 245;
+sunlightShadowCamera.bottom = -245;
+sunlightShadowCamera.near = 1;
+sunlightShadowCamera.far = 360;
+sunlightShadowCamera.updateProjectionMatrix();
+scene.add(sunlight);
+const skylineGlow = new THREE.PointLight("#f0b58e", 7, 230, 2);
 skylineGlow.position.set(0, 32, -118);
 scene.add(skylineGlow);
 
@@ -71,7 +86,9 @@ const random = createSeededRandom(741);
 const rand = (min: number, max: number) => randomBetween(random, min, max);
 const citySize = 460;
 const city = createCity(scene, random);
-const { buildings, facadeMeshes } = city;
+sunlight.shadow.needsUpdate = true;
+const { buildings, facadeMeshes, obstacles } = city;
+const worldBlockers = [...buildings, ...obstacles];
 const loot = createLoot(scene, random);
 const enemies: EnemyActor[] = [];
 for (let i = 0; i < 20; i++) enemies.push(createEnemy(scene, camera, random, rand));
@@ -85,6 +102,9 @@ const player = {
   maxHealth: 100,
 };
 const previousPosition = new THREE.Vector3();
+const enemyCollisionPrevious = new THREE.Vector3();
+const enemyCollisionCandidate = new THREE.Vector3();
+const enemyCollisionVelocity = new THREE.Vector3();
 const EYE_HEIGHT = 1.62;
 const MAX_HOOK_DISTANCE = 120;
 const MAX_ALTITUDE = 145;
@@ -334,20 +354,33 @@ function reloadCurrentWeapon(): void {
   showNotice(`リロード完了 — ${weapon.magazine} / ${weapon.reserve}`);
 }
 
-function chaseEnemy(enemy: EnemyActor, dt: number): void {
+function chaseEnemy(enemy: EnemyActor, dt: number): boolean {
   const x = enemy.axis === "x" ? enemy.along : enemy.lane;
   const z = enemy.axis === "x" ? enemy.lane : enemy.along;
   const dx = player.position.x - x;
   const dz = player.position.z - z;
   const distance = Math.hypot(dx, dz);
-  if (distance <= 4.5) return;
+  if (distance > 0) enemy.targetHeading = Math.atan2(-dx, -dz);
+  if (distance <= 4.5) return false;
   const step = Math.min(distance - 4.5, 4.8 * dt);
   const nextX = x + (dx / distance) * step;
   const nextZ = z + (dz / distance) * step;
+  enemyCollisionPrevious.set(x, 0, z);
+  enemyCollisionCandidate.set(nextX, 0, nextZ);
+  enemyCollisionVelocity.subVectors(enemyCollisionCandidate, enemyCollisionPrevious);
+  resolveBuildingCollision(
+    enemyCollisionCandidate,
+    enemyCollisionPrevious,
+    enemyCollisionVelocity,
+    worldBlockers,
+    0,
+  );
+  const moved = enemyCollisionCandidate.x !== x || enemyCollisionCandidate.z !== z;
   enemy.axis = Math.abs(dx) >= Math.abs(dz) ? "x" : "z";
   enemy.direction = Math.sign(enemy.axis === "x" ? dx : dz) || enemy.direction;
-  enemy.along = enemy.axis === "x" ? nextX : nextZ;
-  enemy.lane = enemy.axis === "x" ? nextZ : nextX;
+  enemy.along = enemy.axis === "x" ? enemyCollisionCandidate.x : enemyCollisionCandidate.z;
+  enemy.lane = enemy.axis === "x" ? enemyCollisionCandidate.z : enemyCollisionCandidate.x;
+  return moved;
 }
 
 function collectLoot(pickup: LootPickup): boolean {
@@ -394,13 +427,13 @@ function updateEnemies(dt: number): void {
   for (let index = enemies.length - 1; index >= 0; index--) {
     const enemy = enemies[index];
     if (!enemy) continue;
-    const shot = updateEnemyAI(enemy, dt, player.position, buildings, random);
-    if (enemy.canSeePlayer) chaseEnemy(enemy, dt);
-    else updateEnemy(enemy, dt, random);
-    enemy.walkPhase += dt * (enemy.canSeePlayer ? 7 : enemy.speed * 2.5);
+    const shot = updateEnemyAI(enemy, dt, player.position, worldBlockers, random);
+    enemy.walking = enemy.canSeePlayer ? chaseEnemy(enemy, dt) : updateEnemy(enemy, dt, random);
+    if (enemy.walking) enemy.walkPhase += dt * (enemy.canSeePlayer ? 9 : enemy.speed * 3.5);
+    else enemy.idlePhase += dt * 1.4;
     enemy.shotTimer = Math.max(0, enemy.shotTimer - dt);
     enemy.shotLine.visible = enemy.shotTimer > 0;
-    syncEnemy(enemy, camera);
+    syncEnemy(enemy, camera, dt);
     if (shot) {
       showEnemyShot(enemy, shot.hit);
       if (shot.hit) damagePlayer(ENEMY_DAMAGE);
@@ -474,7 +507,7 @@ function updateFlight(dt: number): void {
     player.position,
     previousPosition,
     player.velocity,
-    buildings,
+    worldBlockers,
     previousY,
   );
 

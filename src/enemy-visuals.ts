@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { RandomSource } from "./game-types.ts";
-import { getEnemyGait } from "./enemies.ts";
+import { getEnemyGait, getRouteHeading, smoothHeading } from "./enemies.ts";
 
 export interface EnemyActor {
   axis: "x" | "z";
@@ -9,6 +9,12 @@ export interface EnemyActor {
   direction: number;
   speed: number;
   walkPhase: number;
+  idlePhase: number;
+  walking: boolean;
+  heading: number;
+  targetHeading: number;
+  aimBlend: number;
+  aimPitch: number;
   health: number;
   maxHealth: number;
   attackTimer: number;
@@ -21,7 +27,10 @@ export interface EnemyActor {
   elbows: THREE.Group[];
   legs: THREE.Group[];
   knees: THREE.Group[];
-  helmet: THREE.Mesh;
+  body: THREE.Mesh;
+  pelvis: THREE.Mesh;
+  head: THREE.Group;
+  rifle: THREE.Group;
   group: THREE.Group;
   healthBar: THREE.Group;
   healthFill: THREE.Mesh;
@@ -115,13 +124,16 @@ export function createEnemy(
   rand: (min: number, max: number) => number,
 ): EnemyActor {
   const group = new THREE.Group();
-  addMesh(group, bodyGeometry, suitMaterial, [0, 1.12, 0]);
-  addMesh(group, pelvisGeometry, suitMaterial, [0, 0.77, 0]);
+  const body = addMesh(group, bodyGeometry, suitMaterial, [0, 1.12, 0]);
+  const pelvis = addMesh(group, pelvisGeometry, suitMaterial, [0, 0.77, 0]);
   addMesh(group, chestPlateGeometry, armorMaterial, [0, 1.23, -0.2]);
   addMesh(group, chestLightGeometry, detailMaterial, [0, 1.2, -0.27]);
   addMesh(group, neckGeometry, jointMaterial, [0, 1.51, 0]);
-  const helmet = addMesh(group, helmetGeometry, armorMaterial, [0, 1.69, 0]);
-  addMesh(group, visorGeometry, visorMaterial, [0, 1.69, -0.2]);
+  const head = new THREE.Group();
+  head.position.set(0, 1.69, 0);
+  addMesh(head, helmetGeometry, armorMaterial, [0, 0, 0]);
+  addMesh(head, visorGeometry, visorMaterial, [0, 0, -0.2]);
+  group.add(head);
 
   const rifle = new THREE.Group();
   rifle.name = "enemy-rifle";
@@ -189,13 +201,22 @@ export function createEnemy(
   shotLine.frustumCulled = false;
   scene.add(shotLine);
 
+  const axis: "x" | "z" = random() < 0.5 ? "x" : "z";
+  const direction = random() < 0.5 ? -1 : 1;
+  const heading = getRouteHeading(axis, direction);
   const enemy = {
-    axis: (random() < 0.5 ? "x" : "z") as "x" | "z",
+    axis,
     lane: (Math.floor(random() * 9) - 4) * 48,
     along: rand(-192, 192),
-    direction: random() < 0.5 ? -1 : 1,
+    direction,
     speed: rand(1.4, 2.6),
     walkPhase: rand(0, Math.PI * 2),
+    idlePhase: rand(0, Math.PI * 2),
+    walking: false,
+    heading,
+    targetHeading: heading,
+    aimBlend: 0,
+    aimPitch: 0,
     health: 100,
     maxHealth: 100,
     attackTimer: random(),
@@ -203,7 +224,10 @@ export function createEnemy(
     canSeePlayer: false,
     aiming: false,
     alerted: false,
-    helmet,
+    body,
+    pelvis,
+    head,
+    rifle,
     arms,
     elbows,
     legs,
@@ -222,29 +246,37 @@ export function createEnemy(
   return enemy;
 }
 
-export function syncEnemy(enemy: EnemyActor, camera: THREE.Camera): void {
+export function syncEnemy(enemy: EnemyActor, camera: THREE.Camera, dt = 1 / 60): void {
   enemy.group.position.set(
     enemy.axis === "x" ? enemy.along : enemy.lane,
-    Math.abs(Math.sin(enemy.walkPhase * 2)) * 0.025,
+    0,
     enemy.axis === "x" ? enemy.lane : enemy.along,
   );
-  enemy.group.rotation.y =
-    enemy.axis === "x"
-      ? enemy.direction > 0
-        ? -Math.PI / 2
-        : Math.PI / 2
-      : enemy.direction > 0
-        ? Math.PI
-        : 0;
+  enemy.targetHeading = Number.isFinite(enemy.targetHeading)
+    ? enemy.targetHeading
+    : getRouteHeading(enemy.axis, enemy.direction);
+  enemy.heading = smoothHeading(enemy.heading, enemy.targetHeading, dt, enemy.walking ? 7 : 10);
+  enemy.group.rotation.y = enemy.heading;
+  enemy.aimBlend = THREE.MathUtils.damp(enemy.aimBlend, enemy.aiming ? 1 : 0, 8, dt);
+  enemy.body.rotation.x = enemy.aimBlend * 0.035;
+  enemy.rifle.rotation.x = enemy.aimPitch * enemy.aimBlend;
+  enemy.body.rotation.z = enemy.walking
+    ? Math.cos(enemy.walkPhase) * 0.025
+    : Math.sin(enemy.idlePhase) * 0.008;
+  enemy.pelvis.rotation.z = enemy.walking ? Math.sin(enemy.walkPhase) * 0.035 : 0;
   for (let i = 0; i < 2; i++) {
     const gait = getEnemyGait(enemy.walkPhase + i * Math.PI);
     enemy.legs[i].rotation.x = gait.leg;
     enemy.knees[i].rotation.x = gait.knee;
-    enemy.arms[i].rotation.x = (enemy.aiming ? 1.5 : 1.3) + gait.arm * 0.12;
+    const walkBlend = enemy.walking ? 1 : 0;
+    enemy.arms[i].rotation.x = 1.2 + enemy.aimBlend * 0.3 + gait.arm * (0.04 + walkBlend * 0.22);
     enemy.arms[i].rotation.z = i === 0 ? 0.45 : -0.45;
-    enemy.elbows[i].rotation.x = enemy.aiming ? 0.35 : 0.45;
+    enemy.elbows[i].rotation.x = 0.48 - enemy.aimBlend * 0.13;
   }
-  enemy.helmet.rotation.x = enemy.aiming ? 0.18 : 0;
+  enemy.head.rotation.x = enemy.aimBlend * 0.18 + Math.sin(enemy.idlePhase) * 0.008;
+  enemy.group.position.y = enemy.walking
+    ? Math.abs(Math.sin(enemy.walkPhase * 2)) * 0.045
+    : Math.sin(enemy.idlePhase) * 0.008;
   enemy.group.updateMatrixWorld(true);
   enemy.healthBar.position.set(
     enemy.group.position.x,

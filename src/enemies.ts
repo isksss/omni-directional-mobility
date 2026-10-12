@@ -9,6 +9,16 @@ const ENEMY_VISION_RANGE = 78;
 const ENEMY_FIRE_RANGE = 46;
 export const ENEMY_DAMAGE = 10;
 
+export function smoothHeading(current: number, target: number, dt: number, rate = 8): number {
+  const difference = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  return current + difference * (1 - Math.exp(-rate * dt));
+}
+
+export function getRouteHeading(axis: "x" | "z", direction: number): number {
+  if (axis === "x") return direction > 0 ? -Math.PI / 2 : Math.PI / 2;
+  return direction > 0 ? Math.PI : 0;
+}
+
 export function getEnemyGait(phase: number) {
   const stride = Math.sin(phase);
   return { leg: stride * 0.48, knee: Math.max(0, stride) * 0.65, arm: -stride * 0.32 };
@@ -44,10 +54,15 @@ export function updateEnemyAI(
     );
 
   enemy.canSeePlayer = canSee;
+  if (canSee) {
+    enemy.targetHeading = Math.atan2(-dx, -dz);
+    enemy.aimPitch = Math.atan2(dy, horizontalDistance);
+  }
   enemy.aiming = canSee && distance <= ENEMY_FIRE_RANGE;
   enemy.alerted = canSee || (enemy.alertTimer ?? 0) > 0;
   enemy.alertTimer = canSee ? 4 : Math.max(0, (enemy.alertTimer ?? 0) - 0.18);
-  if (!canSee || distance > ENEMY_FIRE_RANGE || enemy.attackTimer > 0) return null;
+  if (!canSee || distance > ENEMY_FIRE_RANGE || enemy.attackTimer > 0 || enemy.aimBlend < 0.8)
+    return null;
 
   enemy.attackTimer = 1.15 + random() * 0.35;
   return { hit: random() < Math.max(0.2, 0.82 - distance / 75) };
@@ -105,8 +120,9 @@ export function updateEnemy(
   enemy: EnemyActor,
   dt: number,
   random: RandomSource = Math.random,
-): void {
+): boolean {
   let remaining = enemy.speed * dt;
+  let moved = false;
   while (remaining > EPSILON) {
     const boundary = enemy.direction > 0 ? ROAD_LIMIT : -ROAD_LIMIT;
     const intersection =
@@ -117,6 +133,7 @@ export function updateEnemy(
     const step = Math.min(remaining, distance);
     enemy.along += enemy.direction * step;
     remaining -= step;
+    moved ||= step > EPSILON;
 
     if (step + EPSILON < distance) continue;
     if (Math.abs(enemy.along) >= ROAD_LIMIT - EPSILON) {
@@ -127,4 +144,6 @@ export function updateEnemy(
       enemy.direction = random() < 0.5 ? -1 : 1;
     }
   }
+  enemy.targetHeading = getRouteHeading(enemy.axis, enemy.direction);
+  return moved;
 }

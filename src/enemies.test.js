@@ -1,10 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getEnemyGait, updateEnemy, updateEnemyAI } from "./enemies.ts";
+import { getEnemyGait, smoothHeading, updateEnemy, updateEnemyAI } from "./enemies.ts";
+
+test("enemy heading turns along the short arc and settles smoothly", () => {
+  const halfway = smoothHeading(Math.PI - 0.1, -Math.PI + 0.1, 0.1, 10);
+  assert.ok(halfway > Math.PI);
+  assert.ok(Math.abs(smoothHeading(0, Math.PI / 2, 1, 10) - Math.PI / 2) < 0.001);
+});
 
 test("enemy gait swings the arms opposite the legs and bends the stepping knee", () => {
   assert.deepEqual(getEnemyGait(Math.PI / 2), { leg: 0.48, knee: 0.65, arm: -0.32 });
   assert.deepEqual(getEnemyGait((Math.PI * 3) / 2), { leg: -0.48, knee: 0, arm: 0.32 });
+});
+
+test("enemies finish raising the rifle before firing", () => {
+  const enemy = { axis: "x", lane: 0, along: 0, direction: 1, aimBlend: 0 };
+  const player = { x: 12, y: 0, z: 0 };
+
+  assert.equal(
+    updateEnemyAI(enemy, 0.2, player, [], () => 0),
+    null,
+  );
+  assert.equal(enemy.aiming, true);
+  enemy.aimBlend = 0.9;
+  enemy.aiTimer = 0;
+  assert.deepEqual(
+    updateEnemyAI(enemy, 0.2, player, [], () => 0),
+    { hit: true },
+  );
 });
 
 test("enemies can turn at intersections and continue along the crossing road", () => {
@@ -13,7 +36,14 @@ test("enemies can turn at intersections and continue along the crossing road", (
 
   updateEnemy(enemy, 1, () => values.shift());
 
-  assert.deepEqual(enemy, { axis: "z", lane: 48, along: 46, direction: -1, speed: 4 });
+  assert.deepEqual(enemy, {
+    axis: "z",
+    lane: 48,
+    along: 46,
+    direction: -1,
+    speed: 4,
+    targetHeading: 0,
+  });
 });
 
 test("enemies turn around at the edge of the district", () => {
@@ -26,7 +56,7 @@ test("enemies turn around at the edge of the district", () => {
 });
 
 test("enemies acquire a visible player and fire with a cooldown", () => {
-  const enemy = { axis: "x", lane: 0, along: 0, direction: 1 };
+  const enemy = { axis: "x", lane: 0, along: 0, direction: 1, aimBlend: 0.9 };
   const player = { x: 12, y: 0, z: 0 };
 
   assert.deepEqual(

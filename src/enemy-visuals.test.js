@@ -19,11 +19,13 @@ test("enemy visuals expose a health gauge that follows its hit points", () => {
     true,
   );
   enemy.aiming = true;
-  syncEnemy(enemy, new THREE.PerspectiveCamera());
-  assert.equal(enemy.helmet.rotation.x, 0.18);
+  syncEnemy(enemy, new THREE.PerspectiveCamera(), 1 / 60);
+  assert.ok(enemy.aimBlend > 0 && enemy.aimBlend < 1);
+  syncEnemy(enemy, new THREE.PerspectiveCamera(), 1);
+  assert.ok(Math.abs(enemy.head.rotation.x - 0.18) < 0.001);
   assert.ok(enemy.arms[0].rotation.x > 1.4);
   assert.equal(enemy.arms[0].rotation.z, 0.45);
-  assert.equal(enemy.elbows[0].rotation.x, 0.35);
+  assert.ok(Math.abs(enemy.elbows[0].rotation.x - 0.35) < 0.001);
   assert.equal(enemy.healthBar.parent, scene);
   enemy.health = 25;
   updateEnemyHealthBar(enemy);

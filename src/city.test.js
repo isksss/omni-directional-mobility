@@ -32,6 +32,15 @@ test("solid walls reject entry away from the doorway", () => {
   assert.deepEqual(result.velocity, { x: 0, y: 0, z: 0 });
 });
 
+test("parked vehicles block entry from the road", () => {
+  const vehicle = { x: 0, z: 0, width: 4.2, depth: 1.9, height: 1.4 };
+  const position = { x: -1.5, y: 0, z: 0 };
+  const velocity = { x: 4, y: 0, z: 0 };
+  resolveBuildingCollision(position, { x: -3, y: 0, z: 0 }, velocity, [vehicle], 0);
+  assert.equal(position.x, -3);
+  assert.equal(velocity.x, 0);
+});
+
 test("descending onto a building roof stops at the roof height", () => {
   const result = move(
     { x: 0, y: 12.4, z: 0 },
@@ -62,11 +71,13 @@ test("city generation creates enterable buildings and leaves the scramble crossi
     return seed / 4294967296;
   };
   try {
-    const { buildings, facadeMeshes } = createCity(new THREE.Scene(), random);
+    const { buildings, facadeMeshes, obstacles } = createCity(new THREE.Scene(), random);
     assert.ok(buildings.length > 180);
     assert.ok(buildings.every((item) => item.entranceWidth > 0 && item.entranceHeight > 0));
     assert.ok(buildings.every((item) => !(Math.abs(item.x) < 24 && Math.abs(item.z) < 24)));
     assert.ok(facadeMeshes.length > 0);
+    assert.ok(obstacles.length >= 12);
+    assert.ok(obstacles.every((item) => item.entranceWidth === 0 && item.entranceHeight === 0));
   } finally {
     if (oldDocument === undefined) delete globalThis.document;
     else globalThis.document = oldDocument;

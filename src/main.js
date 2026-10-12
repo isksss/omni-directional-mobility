@@ -32,6 +32,163 @@ sensitivityInputs.forEach((input) =>
 );
 setVerticalSensitivity(verticalSensitivity);
 
+const DEFAULT_KEY_BINDINGS = {
+  moveForward: "KeyW",
+  moveBackward: "KeyS",
+  moveLeft: "KeyA",
+  moveRight: "KeyD",
+  hookLeft: "KeyQ",
+  hookRight: "KeyE",
+  jump: "Space",
+  boost: "ShiftLeft",
+  weaponSwitch: "KeyV",
+};
+const KEY_ACTIONS = [
+  ["moveForward", "前進"],
+  ["moveBackward", "後退"],
+  ["moveLeft", "左移動"],
+  ["moveRight", "右移動"],
+  ["hookLeft", "左フック"],
+  ["hookRight", "右フック"],
+  ["jump", "ジャンプ／巻き取り"],
+  ["boost", "ブースト"],
+  ["weaponSwitch", "武器切り替え"],
+];
+function loadKeyBindings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("omni-key-bindings"));
+    const values = KEY_ACTIONS.map(([action]) => saved?.[action]);
+    if (
+      values.every((code) => typeof code === "string" && code) &&
+      new Set(values).size === values.length
+    ) {
+      return Object.fromEntries(KEY_ACTIONS.map(([action], index) => [action, values[index]]));
+    }
+  } catch {}
+  return { ...DEFAULT_KEY_BINDINGS };
+}
+const keyBindings = loadKeyBindings();
+const keySettings = [...document.querySelectorAll("[data-key-settings]")];
+let pendingBinding = null;
+function formatKey(code) {
+  const labels = {
+    Space: "SPACE",
+    ShiftLeft: "SHIFT",
+    ShiftRight: "SHIFT",
+    ControlLeft: "CTRL",
+    ControlRight: "CTRL",
+    AltLeft: "ALT",
+    AltRight: "ALT",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    ArrowLeft: "←",
+    ArrowRight: "→",
+  };
+  return labels[code] ?? code.replace(/^Key|^Digit/, "").toUpperCase();
+}
+function updateKeySettings() {
+  for (const settings of keySettings) {
+    settings.querySelectorAll("[data-bind-action]").forEach((button) => {
+      const action = button.dataset.bindAction;
+      const key = pendingBinding === action ? "入力待ち…" : formatKey(keyBindings[action]);
+      button.textContent = key;
+      button.setAttribute(
+        "aria-label",
+        `${KEY_ACTIONS.find(([key]) => key === action)[1]}のキー: ${key}`,
+      );
+      button.setAttribute("aria-pressed", String(pendingBinding === action));
+    });
+  }
+  document.querySelectorAll("[data-key-label]").forEach((element) => {
+    const action = element.dataset.keyLabel;
+    element.textContent =
+      action === "movement"
+        ? ["moveForward", "moveLeft", "moveBackward", "moveRight"]
+            .map((key) => formatKey(keyBindings[key]))
+            .join(" ")
+        : formatKey(keyBindings[action]);
+  });
+}
+function setKeySettingsStatus(message) {
+  keySettings.forEach((settings) => {
+    settings.querySelector("[data-key-setting-status]").textContent = message;
+  });
+}
+function saveKeyBindings() {
+  try {
+    localStorage.setItem("omni-key-bindings", JSON.stringify(keyBindings));
+  } catch {}
+}
+for (const settings of keySettings) {
+  const list = settings.querySelector("[data-key-binding-list]");
+  for (const [action, label] of KEY_ACTIONS) {
+    const row = document.createElement("div");
+    row.className = "key-binding-row";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.bindAction = action;
+    row.append(name, button);
+    list.append(row);
+  }
+  settings.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (button?.hasAttribute("data-reset-key-bindings")) {
+      pendingBinding = null;
+      Object.assign(keyBindings, DEFAULT_KEY_BINDINGS);
+      saveKeyBindings();
+      updateKeySettings();
+      setKeySettingsStatus("初期設定に戻しました");
+    } else if (button?.dataset.bindAction) {
+      pendingBinding = button.dataset.bindAction;
+      updateKeySettings();
+      setKeySettingsStatus(
+        `${KEY_ACTIONS.find(([action]) => action === pendingBinding)[1]}のキーを押してください（Escでキャンセル）`,
+      );
+    }
+  });
+}
+updateKeySettings();
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (!pendingBinding) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.repeat) return;
+    if (event.code === "Escape") {
+      pendingBinding = null;
+      updateKeySettings();
+      setKeySettingsStatus("");
+      return;
+    }
+    if (!event.code || event.code === "Unidentified") {
+      setKeySettingsStatus("このキーは割り当てできません");
+      return;
+    }
+    const conflict = KEY_ACTIONS.find(
+      ([action]) =>
+        action !== pendingBinding &&
+        (keyBindings[action] === event.code ||
+          (action === "boost" && keyBindings.boost === "ShiftLeft" && event.code === "ShiftRight")),
+    );
+    if (conflict) {
+      setKeySettingsStatus(`${formatKey(event.code)}は「${conflict[1]}」に割り当て済みです`);
+      return;
+    }
+    const action = pendingBinding;
+    keyBindings[action] = event.code;
+    pendingBinding = null;
+    saveKeyBindings();
+    updateKeySettings();
+    setKeySettingsStatus(
+      `${KEY_ACTIONS.find(([key]) => key === action)[1]}を${formatKey(event.code)}に設定しました`,
+    );
+  },
+  true,
+);
+
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#111827");
 scene.fog = new THREE.FogExp2("#111827", 0.0031);
@@ -319,6 +476,14 @@ const EYE_HEIGHT = 1.62;
 const MAX_HOOK_DISTANCE = 120;
 const COLLISION_RADIUS = 0.48;
 const MAX_ALTITUDE = 145;
+const WEAPONS = [
+  { name: "SNIPER", range: 220, fireInterval: 550, automatic: false },
+  { name: "ASSAULT MG", range: 90, fireInterval: 95, automatic: true },
+];
+const weaponName = document.querySelector("#weapon-name");
+let weaponIndex = 0;
+let nextShotAt = 0;
+let firing = false;
 const tethers = [null, null];
 const ropeLengths = [0, 0];
 let currentTarget = null;
@@ -327,7 +492,6 @@ let kills = 0;
 let respawnTimer = 0;
 let hasStarted = false;
 const keys = new Set();
-const reelKeys = new Set();
 const raycaster = new THREE.Raycaster();
 raycaster.far = MAX_HOOK_DISTANCE;
 const screenCenter = new THREE.Vector2(0, 0);
@@ -387,20 +551,22 @@ function showNotice(message) {
   noticeTimer = setTimeout(() => notice.classList.remove("visible"), 1700);
 }
 
-function aimAtWall() {
+function aimAtWall(maxDistance = MAX_HOOK_DISTANCE) {
+  raycaster.far = maxDistance;
   raycaster.setFromCamera(screenCenter, camera);
-  const hit = raycaster
-    .intersectObjects(facadeMeshes, false)
-    .find(({ point }) => point.distanceTo(player.position) <= MAX_HOOK_DISTANCE);
+  const hit = raycaster.intersectObjects(facadeMeshes, false)[0];
+  raycaster.far = MAX_HOOK_DISTANCE;
   return hit ? { position: hit.point.clone(), distance: hit.distance } : null;
 }
 
-function aimAtEnemy() {
+function aimAtEnemy(maxDistance = WEAPONS[weaponIndex].range) {
+  raycaster.far = maxDistance;
   raycaster.setFromCamera(screenCenter, camera);
   const hit = raycaster.intersectObjects(
     enemies.map((enemy) => enemy.group),
     true,
   )[0];
+  raycaster.far = MAX_HOOK_DISTANCE;
   if (!hit) return null;
   let target = hit.object;
   while (target && !target.userData.enemy) target = target.parent;
@@ -420,14 +586,17 @@ function beginTether(index) {
   }
   tethers[index] = currentTarget;
   ropeLengths[index] = Math.max(7, camera.position.distanceTo(currentTarget.position));
-  showNotice(`${index ? "右" : "左"}フック接続 — Shift+Q/E で巻き取り`);
+  showNotice(`${index ? "右" : "左"}フック接続 — Space で巻き取り`);
 }
 
-function fireGun() {
+function fireGun(now = performance.now()) {
+  const weapon = WEAPONS[weaponIndex];
+  if (now < nextShotAt) return;
+  nextShotAt = now + weapon.fireInterval;
   camera.updateMatrixWorld();
-  const hit = aimAtEnemy();
+  const hit = aimAtEnemy(weapon.range);
   if (!hit) return;
-  const wall = aimAtWall();
+  const wall = aimAtWall(weapon.range);
   if (wall && wall.distance < hit.distance) {
     showNotice("建物に遮られています");
     return;
@@ -438,6 +607,13 @@ function fireGun() {
   enemyCountValue.textContent = String(enemies.length);
   killCountValue.textContent = String(kills);
   showNotice(`敵を撃破 — ${kills} KILLS`);
+}
+
+function switchWeapon() {
+  weaponIndex = (weaponIndex + 1) % WEAPONS.length;
+  weaponName.textContent = WEAPONS[weaponIndex].name;
+  nextShotAt = 0;
+  showNotice(`武器切り替え — ${WEAPONS[weaponIndex].name}`);
 }
 
 function updateEnemies(dt) {
@@ -497,22 +673,23 @@ function updateFlight(dt) {
   moveForward.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
   moveRight.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
   moveDirection.set(0, 0, 0);
-  if (keys.has("KeyW")) moveDirection.add(moveForward);
-  if (keys.has("KeyS")) moveDirection.sub(moveForward);
-  if (keys.has("KeyD")) moveDirection.add(moveRight);
-  if (keys.has("KeyA")) moveDirection.sub(moveRight);
+  if (keys.has(keyBindings.moveForward)) moveDirection.add(moveForward);
+  if (keys.has(keyBindings.moveBackward)) moveDirection.sub(moveForward);
+  if (keys.has(keyBindings.moveRight)) moveDirection.add(moveRight);
+  if (keys.has(keyBindings.moveLeft)) moveDirection.sub(moveRight);
   if (moveDirection.lengthSq() > 1) moveDirection.normalize();
 
-  const boost = keys.has("ShiftLeft") || keys.has("ShiftRight");
+  const boost =
+    keyBindings.boost === "ShiftLeft"
+      ? keys.has("ShiftLeft") || keys.has("ShiftRight")
+      : keys.has(keyBindings.boost);
   if (moveDirection.lengthSq() > 0) {
     player.velocity.addScaledVector(moveDirection, (grounded ? 25 : 15) * (boost ? 1.8 : 1) * dt);
   }
   for (let i = 0; i < tethers.length; i++) {
     const tether = tethers[i];
     if (!tether) continue;
-    if (keys.has("Space") || reelKeys.has(i ? "KeyE" : "KeyQ")) {
-      ropeLengths[i] = Math.max(7, ropeLengths[i] - 15 * dt);
-    }
+    if (keys.has(keyBindings.jump)) ropeLengths[i] = Math.max(7, ropeLengths[i] - 15 * dt);
     towardAnchor.subVectors(tether.position, player.position);
     towardAnchor.y -= EYE_HEIGHT;
     const distance = towardAnchor.length();
@@ -637,6 +814,7 @@ function frame(now) {
   previousTime = now;
   updateFlight(dt);
   updateEnemies(dt);
+  if (firing && WEAPONS[weaponIndex].automatic) fireGun(now);
   updateCamera(dt);
   updateTargetAndHud(time);
   renderer.render(scene, camera);
@@ -657,6 +835,9 @@ for (const button of [
   document.querySelector("#resume-button"),
 ]) {
   button.addEventListener("click", () => {
+    pendingBinding = null;
+    updateKeySettings();
+    setKeySettingsStatus("");
     hasStarted = true;
     setGameUi();
     requestLock();
@@ -666,7 +847,7 @@ for (const button of [
 document.addEventListener("pointerlockchange", () => {
   if (document.pointerLockElement !== canvas) {
     keys.clear();
-    reelKeys.clear();
+    firing = false;
     tethers.fill(null);
     scoped = false;
     hud.classList.remove("scoped");
@@ -696,7 +877,10 @@ document.addEventListener("mousemove", (event) => {
 
 canvas.addEventListener("mousedown", (event) => {
   if (document.pointerLockElement !== canvas) return;
-  if (event.button === 0) fireGun();
+  if (event.button === 0) {
+    firing = true;
+    fireGun();
+  }
   if (event.button === 2) {
     scoped = true;
     hud.classList.add("scoped");
@@ -704,6 +888,7 @@ canvas.addEventListener("mousedown", (event) => {
 });
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 window.addEventListener("mouseup", (event) => {
+  if (event.button === 0) firing = false;
   if (event.button === 2) {
     scoped = false;
     hud.classList.remove("scoped");
@@ -711,28 +896,21 @@ window.addEventListener("mouseup", (event) => {
 });
 window.addEventListener("keydown", (event) => {
   if (event.target instanceof HTMLInputElement && event.target.type === "range") return;
+  if (document.pointerLockElement !== canvas) return;
   if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code))
     event.preventDefault();
   keys.add(event.code);
-  if (document.pointerLockElement === canvas && !event.repeat) {
-    if (event.code === "KeyQ" && event.key === "q") beginTether(0);
-    if (event.code === "KeyE" && event.key === "e") beginTether(1);
-    if (event.code === "KeyQ" && event.key === "Q") reelKeys.add(event.code);
-    if (event.code === "KeyE" && event.key === "E") reelKeys.add(event.code);
-  }
-  if (
-    event.code === "Space" &&
-    !event.repeat &&
-    !tethers.some(Boolean) &&
-    document.pointerLockElement === canvas &&
-    player.position.y <= 0.03
-  ) {
-    player.velocity.y = 9.2;
+  if (!event.repeat) {
+    if (event.code === keyBindings.hookLeft) beginTether(0);
+    if (event.code === keyBindings.hookRight) beginTether(1);
+    if (event.code === keyBindings.weaponSwitch) switchWeapon();
+    if (event.code === keyBindings.jump && !tethers.some(Boolean) && player.position.y <= 0.03) {
+      player.velocity.y = 9.2;
+    }
   }
 });
 window.addEventListener("keyup", (event) => {
   keys.delete(event.code);
-  reelKeys.delete(event.code);
 });
 
 setGameUi();

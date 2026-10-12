@@ -132,6 +132,7 @@ button {
   display: none !important;
 }
 .start-screen {
+  overflow-y: auto;
   padding: 110px 10.8vw 80px;
   background:
     linear-gradient(
@@ -145,6 +146,7 @@ button {
 }
 .intro-card {
   width: min(520px, 48vw);
+  margin-block: auto;
 }
 .eyebrow {
   color: var(--muted);
@@ -256,6 +258,72 @@ h2 em {
   color: rgba(240, 245, 243, 0.4);
   font: 8px var(--mono);
 }
+.key-settings {
+  width: min(360px, 100%);
+  max-height: min(40vh, 300px);
+  margin-top: 18px;
+  overflow-y: auto;
+  color: rgba(240, 245, 243, 0.68);
+  font-size: 10px;
+}
+.key-settings summary {
+  width: fit-content;
+  color: var(--acid);
+  cursor: pointer;
+}
+.key-settings summary:focus-visible,
+.key-binding-row button:focus-visible,
+.reset-key-bindings:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 3px;
+}
+.key-settings > p {
+  margin: 10px 0 0;
+  line-height: 1.6;
+}
+.key-binding-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 14px;
+  margin-top: 10px;
+}
+.key-binding-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.key-binding-row button,
+.reset-key-bindings {
+  border: 1px solid rgba(240, 245, 243, 0.23);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  cursor: pointer;
+  font: 9px var(--mono);
+}
+.key-binding-row button {
+  min-width: 48px;
+  padding: 4px 6px;
+}
+.key-binding-row button[aria-pressed="true"] {
+  border-color: var(--acid);
+  color: var(--acid);
+}
+.key-setting-status {
+  min-height: 1.4em;
+  color: var(--acid);
+}
+.reset-key-bindings {
+  margin-top: 4px;
+  padding: 6px 8px;
+}
+.pause-card .key-settings {
+  width: 100%;
+  margin-top: 20px;
+}
 .pause-card .sensitivity-setting {
   width: 100%;
   margin: 24px 0 0;
@@ -291,12 +359,14 @@ kbd {
 }
 
 .pause-screen {
+  overflow-y: auto;
   justify-content: center;
   background: rgba(7, 11, 19, 0.54);
   backdrop-filter: blur(7px);
 }
 .pause-card {
   width: min(420px, calc(100vw - 40px));
+  margin-block: auto;
   padding: 40px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(12, 18, 28, 0.83);
@@ -382,6 +452,11 @@ kbd {
   font: 10px var(--mono);
   letter-spacing: 0.08em;
   color: rgba(238, 243, 241, 0.7);
+}
+.weapon-name {
+  color: var(--acid);
+  font: 11px var(--mono);
+  letter-spacing: 0.12em;
 }
 .hook-status i {
   width: 6px;

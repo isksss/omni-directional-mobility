@@ -35,13 +35,32 @@
             <span>FLIGHT START</span><span aria-hidden="true">↗</span>
           </button>
           <div class="quick-controls" aria-label="基本操作">
-            <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移動</span>
+            <span><kbd data-key-label="movement">W A S D</kbd> 移動</span>
             <span><kbd>マウス</kbd> 視点</span>
-            <span><kbd>q</kbd>/<kbd>e</kbd> フック射出／解除</span>
-            <span><kbd>Shift</kbd><kbd>Q</kbd>/<kbd>E</kbd> 巻き取り</span>
+            <span>
+              <kbd data-key-label="hookLeft">Q</kbd>/<kbd data-key-label="hookRight">E</kbd>
+              フック射出／解除
+            </span>
+            <span><kbd data-key-label="jump">SPACE</kbd> ジャンプ／巻き取り</span>
+            <span><kbd data-key-label="boost">SHIFT</kbd> ブースト</span>
+            <span><kbd data-key-label="weaponSwitch">V</kbd> 武器切り替え</span>
             <span><kbd>右クリック</kbd> 照準</span>
             <span><kbd>左クリック</kbd> 射撃</span>
           </div>
+          <details class="key-settings" data-key-settings>
+            <summary>キー割り当て</summary>
+            <p>変更する操作を選び、使いたいキーを押してください。Escでキャンセルできます。</p>
+            <div class="key-binding-list" data-key-binding-list></div>
+            <p
+              class="key-setting-status"
+              data-key-setting-status
+              role="status"
+              aria-live="polite"
+            ></p>
+            <button class="reset-key-bindings" data-reset-key-bindings type="button">
+              初期設定に戻す
+            </button>
+          </details>
           <label class="sensitivity-setting">
             <span class="sensitivity-heading"
               >マウス上下感度 <output data-sensitivity-value>1.0×</output></span
@@ -70,6 +89,20 @@
           <button id="resume-button" class="primary-button" type="button">
             <span>RESUME FLIGHT</span><span aria-hidden="true">↗</span>
           </button>
+          <details class="key-settings" data-key-settings>
+            <summary>キー割り当て</summary>
+            <p>変更する操作を選び、使いたいキーを押してください。Escでキャンセルできます。</p>
+            <div class="key-binding-list" data-key-binding-list></div>
+            <p
+              class="key-setting-status"
+              data-key-setting-status
+              role="status"
+              aria-live="polite"
+            ></p>
+            <button class="reset-key-bindings" data-reset-key-bindings type="button">
+              初期設定に戻す
+            </button>
+          </details>
           <label class="sensitivity-setting">
             <span class="sensitivity-heading"
               >マウス上下感度 <output data-sensitivity-value>1.0×</output></span
@@ -101,7 +134,8 @@
             >HOSTILES <b id="enemy-count">20</b>
             <span>／ KILLS <b id="kill-count">0</b></span></span
           >
-          <span class="system-label">TETHER SYSTEM</span>
+          <span class="system-label">WEAPON / TETHER SYSTEM</span>
+          <span id="weapon-name" class="weapon-name">SNIPER</span>
           <span id="hook-status" class="hook-status"><i></i> L — · R —</span>
         </div>
         <div id="reticle" class="reticle" aria-hidden="true"><span></span></div>
@@ -114,11 +148,16 @@
           </div>
           <div class="tether-hint">
             <span class="mouse-icon">LMB</span><span>射撃</span> <span class="mouse-icon">RMB</span
-            ><span>照準</span> <kbd>q/e</kbd><span>フック</span><kbd>Shift</kbd><kbd>Q/E</kbd
-            ><span>巻取</span> <b>SPACE</b><span>ジャンプ／巻取</span>
+            ><span>照準</span> <kbd data-key-label="hookLeft">Q</kbd>/<kbd
+              data-key-label="hookRight"
+              >E</kbd
+            >
+            <span>フック</span><kbd data-key-label="jump">SPACE</kbd><span>ジャンプ／巻取</span>
           </div>
           <div class="key-hints">
-            <kbd>SHIFT</kbd><span>BOOST</span><kbd>ESC</kbd><span>PAUSE</span>
+            <kbd data-key-label="boost">SHIFT</kbd><span>BOOST</span>
+            <kbd data-key-label="weaponSwitch">V</kbd><span>WEAPON</span><kbd>ESC</kbd
+            ><span>PAUSE</span>
           </div>
         </div>
       </section>

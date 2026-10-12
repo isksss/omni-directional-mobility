@@ -1,4 +1,15 @@
 import * as THREE from "three";
+import {
+  CITY_NODES,
+  CITY_ROADS,
+  connectedRoads,
+  getRoadLength,
+  getRoadPosition,
+  getRoadSamples,
+  roadNetworkClearance,
+  terrainHeight,
+  type RoadSample,
+} from "./city-layout.ts";
 import type { BuildingBounds, RandomSource } from "./game-types.ts";
 import { randomBetween } from "./game-utils.ts";
 
@@ -7,7 +18,6 @@ export interface CityBuilding extends BuildingBounds {
   entranceHeight: number;
 }
 
-const ROAD_SPACING = 48;
 const ENTRANCE_WIDTH = 2.8;
 const ENTRANCE_HEIGHT = 2.7;
 const unitBox = new THREE.BoxGeometry(1, 1, 1);
@@ -23,7 +33,7 @@ function addMatrix(
   depth: number,
   rotation = 0,
 ): void {
-  transform.position.set(x, y, z);
+  transform.position.set(x, y + terrainHeight(x, z), z);
   transform.rotation.set(0, rotation, 0);
   transform.scale.set(width, height, depth);
   transform.updateMatrix();
@@ -54,6 +64,72 @@ function addOrientedMatrix(
     depth,
     rotation,
   );
+}
+
+function ribbonGeometry(
+  samples: readonly RoadSample[],
+  width: number,
+  offset = 0,
+  elevation = 0.035,
+): THREE.BufferGeometry {
+  const positions = new Float32Array(samples.length * 6);
+  const uvs = new Float32Array(samples.length * 4);
+  const indices: number[] = [];
+  for (let index = 0; index < samples.length; index++) {
+    const point = samples[index]!;
+    const previous = samples[Math.max(0, index - 1)]!;
+    const next = samples[Math.min(samples.length - 1, index + 1)]!;
+    const dx = next.x - previous.x;
+    const dz = next.z - previous.z;
+    const length = Math.hypot(dx, dz) || 1;
+    const normalX = -dz / length;
+    const normalZ = dx / length;
+    const centerX = point.x + normalX * offset;
+    const centerZ = point.z + normalZ * offset;
+    const leftX = centerX + (normalX * width) / 2;
+    const leftZ = centerZ + (normalZ * width) / 2;
+    const rightX = centerX - (normalX * width) / 2;
+    const rightZ = centerZ - (normalZ * width) / 2;
+    const vertex = index * 6;
+    positions.set(
+      [
+        leftX,
+        terrainHeight(leftX, leftZ) + elevation,
+        leftZ,
+        rightX,
+        terrainHeight(rightX, rightZ) + elevation,
+        rightZ,
+      ],
+      vertex,
+    );
+    const uv = index * 4;
+    const longitudinal = point.distance / 460;
+    uvs.set([longitudinal, 0, longitudinal, 1], uv);
+    if (index < samples.length - 1) {
+      const first = index * 2;
+      indices.push(first, first + 2, first + 1, first + 1, first + 2, first + 3);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function addRibbon(
+  scene: THREE.Scene,
+  samples: readonly RoadSample[],
+  width: number,
+  material: THREE.Material,
+  offset = 0,
+  elevation = 0.035,
+): THREE.Mesh {
+  const mesh = new THREE.Mesh(ribbonGeometry(samples, width, offset, elevation), material);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  return mesh;
 }
 
 function addInstances(
@@ -252,17 +328,17 @@ export function createCity(
     );
   }
 
-  for (let gx = -8; gx <= 7; gx++) {
-    for (let gz = -8; gz <= 7; gz++) {
-      const x = gx * 24 + 12;
-      const z = gz * 24 + 12;
-      // Keep the four blocks around the famous crossing open as a pedestrian plaza.
-      if (Math.abs(x) < 24 && Math.abs(z) < 24) continue;
+  for (let gx = -11; gx <= 10; gx++) {
+    for (let gz = -11; gz <= 10; gz++) {
+      const x = gx * 20 + 10 + Math.sin(gz * 0.8) * 3 + rand(-1.5, 1.5);
+      const z = gz * 20 + 10 + Math.sin(gx * 0.9) * 3 + rand(-1.5, 1.5);
+      if (Math.hypot(x, z) < 33 || (Math.abs(x + 18) < 18 && Math.abs(z - 17) < 15)) continue;
       if (random() < 0.06) continue;
       const width = rand(9, 15);
       const depth = rand(9, 15);
+      if (roadNetworkClearance(x, z) < Math.max(width, depth) / 2 + 2.8) continue;
       const height = rand(14, 58);
-      const chunk = Math.floor((gx + 8) / 4) + Math.floor((gz + 8) / 4) * 4;
+      const chunk = Math.floor((gx + 11) / 6) + Math.floor((gz + 11) / 6) * 4;
       const facade = Math.floor(random() * facadeMaterials.length);
       const minZ = z - depth / 2;
       const entranceWidth = Math.min(ENTRANCE_WIDTH, width - 2.4);
@@ -314,6 +390,7 @@ export function createCity(
         width,
         depth,
         height,
+        baseY: terrainHeight(x, z),
         entranceWidth,
         entranceHeight: ENTRANCE_HEIGHT,
       });
@@ -439,6 +516,7 @@ export function createCity(
         ? building.z + (sz < 0 ? building.depth / 2 + 0.34 : -building.depth / 2 - 0.34)
         : building.z,
     );
+    panel.position.y += terrainHeight(panel.position.x, panel.position.z);
     panel.rotation.y = rotation;
     scene.add(panel);
   }
@@ -495,9 +573,17 @@ export function createCity(
   const signalRedMaterial = new THREE.MeshBasicMaterial({ color: "#ff4848" });
   const signalAmberMaterial = new THREE.MeshBasicMaterial({ color: "#413626" });
   const signalGreenMaterial = new THREE.MeshBasicMaterial({ color: "#263d34" });
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(540, 540), groundMaterial);
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -0.08;
+  const groundGeometry = new THREE.PlaneGeometry(540, 540, 120, 120);
+  const groundVertices = groundGeometry.attributes.position;
+  for (let index = 0; index < groundVertices.count; index++) {
+    const x = groundVertices.getX(index);
+    const z = -groundVertices.getY(index);
+    groundVertices.setZ(index, terrainHeight(x, z));
+  }
+  groundGeometry.computeVertexNormals();
+  groundGeometry.rotateX(-Math.PI / 2);
+  const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+  ground.position.y = -0.12;
   ground.receiveShadow = true;
   scene.add(ground);
   const crossingSurface = new THREE.Mesh(
@@ -511,45 +597,40 @@ export function createCity(
     }),
   );
   crossingSurface.rotation.x = -Math.PI / 2;
-  crossingSurface.position.y = -0.025;
+  crossingSurface.position.y = terrainHeight(0, 0) - 0.025;
   crossingSurface.receiveShadow = true;
   scene.add(crossingSurface);
 
-  function groundStrips(
-    width: number,
-    depth: number,
-    axis: "x" | "z",
-    y: number,
-    material: THREE.Material,
-    offset = 0,
-  ): void {
-    const strips = new THREE.InstancedMesh(new THREE.PlaneGeometry(width, depth), material, 9);
-    for (let i = -4; i <= 4; i++) {
-      transform.position.set(
-        axis === "x" ? 0 : i * ROAD_SPACING + offset,
-        y,
-        axis === "x" ? i * ROAD_SPACING + offset : 0,
-      );
-      transform.rotation.set(-Math.PI / 2, 0, 0);
-      transform.updateMatrix();
-      strips.setMatrixAt(i + 4, transform.matrix);
+  for (const road of CITY_ROADS) {
+    const samples = getRoadSamples(road.id);
+    addRibbon(scene, samples, road.width, roadMaterial);
+    if (road.kind !== "pedestrian") {
+      for (const side of [-1, 1]) {
+        addRibbon(scene, samples, 2.2, sidewalkMaterial, side * (road.width / 2 + 1.1), 0.055);
+        addRibbon(scene, samples, 0.18, curbMaterial, (side * road.width) / 2, 0.09);
+      }
     }
-    strips.instanceMatrix.needsUpdate = true;
-    strips.receiveShadow = true;
-    scene.add(strips);
-  }
-  groundStrips(460, 8, "x", 0.005, roadMaterial);
-  groundStrips(8, 460, "z", 0.006, roadMaterial);
-  for (const side of [-1, 1]) {
-    groundStrips(460, 1.7, "x", 0.012, sidewalkMaterial, side * 5.1);
-    groundStrips(1.7, 460, "z", 0.013, sidewalkMaterial, side * 5.1);
   }
 
   const roadDashes: THREE.Matrix4[] = [];
-  for (let road = -4; road <= 4; road++) {
-    for (let at = -220; at <= 220; at += 12) {
-      addMatrix(roadDashes, at, 0.027, road * ROAD_SPACING, 6, 0.025, 0.18);
-      addMatrix(roadDashes, road * ROAD_SPACING, 0.028, at, 6, 0.025, 0.18, Math.PI / 2);
+  for (const road of CITY_ROADS) {
+    if (road.kind !== "arterial") continue;
+    let lastDash = -1;
+    for (const sample of getRoadSamples(road.id)) {
+      const dash = Math.floor(sample.distance / 12);
+      if (dash === lastDash) continue;
+      lastDash = dash;
+      if (dash % 2 || Math.hypot(sample.x, sample.z) < 32) continue;
+      addMatrix(
+        roadDashes,
+        sample.x,
+        0.055,
+        sample.z,
+        4.5,
+        0.025,
+        0.14,
+        sample.heading + Math.PI / 2,
+      );
     }
   }
   addInstances(scene, unitBox, fadedMarking, roadDashes);
@@ -570,7 +651,6 @@ export function createCity(
   addInstances(scene, unitBox, markingMaterial, stopLineMatrices);
 
   // Curbs, trees, lamps and the signal poles are instanced to keep the dense district light to render.
-  const curbMatrices: THREE.Matrix4[] = [];
   const treeTrunks: THREE.Matrix4[] = [];
   const treeCrowns: THREE.Matrix4[] = [];
   const lampPosts: THREE.Matrix4[] = [];
@@ -627,80 +707,94 @@ export function createCity(
     emissiveIntensity: 0.2,
     roughness: 0.3,
   });
-  for (let road = -4; road <= 4; road++) {
-    for (let segment = -4; segment < 4; segment += 2) {
-      const along = segment * ROAD_SPACING + ROAD_SPACING / 2;
-      if (Math.abs(along) < 30 && Math.abs(road * ROAD_SPACING) < 30) continue;
-      addMatrix(manholeMatrices, along, 0.025, road * ROAD_SPACING, 1, 0.035, 1);
-      addMatrix(manholeMatrices, road * ROAD_SPACING, 0.026, along, 1, 0.035, 1);
+  for (const road of CITY_ROADS) {
+    const length = getRoadLength(road.id);
+    for (let distance = 28; distance < length - 12; distance += 42) {
+      const location = getRoadPosition(road.id, distance);
+      const tangentX = -Math.sin(location.heading);
+      const tangentZ = -Math.cos(location.heading);
+      const normalX = -tangentZ;
+      const normalZ = tangentX;
+      if (road.kind === "arterial" && Math.hypot(location.x, location.z) > 32) {
+        addMatrix(
+          manholeMatrices,
+          location.x + normalX * 1.5,
+          0.025,
+          location.z + normalZ * 1.5,
+          1,
+          0.035,
+          1,
+        );
+      }
       for (const side of [-1, 1]) {
-        addMatrix(drainMatrices, along, 0.035, road * ROAD_SPACING + side * 3.45, 1.1, 0.025, 0.28);
         addMatrix(
           drainMatrices,
-          road * ROAD_SPACING + side * 3.45,
-          0.036,
-          along,
+          location.x + normalX * side * (road.width / 2 - 0.35),
+          0.035,
+          location.z + normalZ * side * (road.width / 2 - 0.35),
           1.1,
           0.025,
           0.28,
-          Math.PI / 2,
+          location.heading + Math.PI / 2,
         );
       }
     }
   }
-  for (let roadX = -4; roadX <= 4; roadX++) {
-    for (let roadZ = -4; roadZ <= 4; roadZ++) {
-      const x = roadX * ROAD_SPACING;
-      const z = roadZ * ROAD_SPACING;
-      if (!(Math.abs(x) < 30 && Math.abs(z) < 30)) {
-        for (const sx of [-1, 1]) {
-          for (const sz of [-1, 1]) {
-            addMatrix(curbMatrices, x + sx * 5.95, 0.09, z + sz * 5.95, 0.16, 0.18, 0.16);
-          }
-        }
-      }
-      if (Math.abs(roadX) <= 1 && Math.abs(roadZ) <= 1) {
-        for (const sx of [-1, 1]) {
-          for (const sz of [-1, 1]) {
-            const px = x + sx * 7.4;
-            const pz = z + sz * 7.4;
-            addMatrix(trafficPoles, px, 2.45, pz, 0.16, 4.9, 0.16);
-            addMatrix(trafficHeads, px - sx * 0.72, 4.2, pz - sz * 0.25, 0.42, 0.88, 0.36);
-            addMatrix(signalLenses[0], px - sx * 0.72, 4.47, pz - sz * 0.44, 0.17, 0.17, 0.07);
-            addMatrix(signalLenses[1], px - sx * 0.72, 4.2, pz - sz * 0.44, 0.17, 0.17, 0.07);
-            addMatrix(signalLenses[2], px - sx * 0.72, 3.93, pz - sz * 0.44, 0.17, 0.17, 0.07);
-          }
-        }
-      }
+  for (const [nodeId, node] of Object.entries(CITY_NODES)) {
+    if (connectedRoads(nodeId).length < 3) continue;
+    for (const side of [-1, 1]) {
+      const px = node.x + side * 5.3;
+      const pz = node.z + (side > 0 ? -5.3 : 5.3);
+      addMatrix(trafficPoles, px, 2.45, pz, 0.16, 4.9, 0.16);
+      addMatrix(trafficHeads, px - side * 0.72, 4.2, pz - side * 0.25, 0.42, 0.88, 0.36);
+      addMatrix(signalLenses[0], px - side * 0.72, 4.47, pz - side * 0.44, 0.17, 0.17, 0.07);
+      addMatrix(signalLenses[1], px - side * 0.72, 4.2, pz - side * 0.44, 0.17, 0.17, 0.07);
+      addMatrix(signalLenses[2], px - side * 0.72, 3.93, pz - side * 0.44, 0.17, 0.17, 0.07);
     }
   }
-  for (let road = -4; road <= 4; road++) {
-    for (let segment = -4; segment < 4; segment++) {
-      const along = segment * ROAD_SPACING + ROAD_SPACING / 2;
+  for (const road of CITY_ROADS) {
+    if (road.kind === "pedestrian") continue;
+    for (let distance = 22; distance < getRoadLength(road.id) - 12; distance += 38) {
+      const location = getRoadPosition(road.id, distance);
+      const tangentX = -Math.sin(location.heading);
+      const tangentZ = -Math.cos(location.heading);
+      const normalX = -tangentZ;
+      const normalZ = tangentX;
+      if (Math.hypot(location.x, location.z) < 31) continue;
       for (const side of [-1, 1]) {
-        const positions: [number, number, number][] = [
-          [along, side * 5.1, 0],
-          [side * 5.1, along, 0],
-        ];
-        for (const [x, z] of positions) {
+        const offset = road.width / 2 + 3.8;
+        const x = location.x + normalX * side * offset;
+        const z = location.z + normalZ * side * offset;
+        if (random() < (road.kind === "alley" ? 0.22 : 0.58)) {
           addMatrix(treeTrunks, x, 1.15, z, 0.28, 2.3, 0.28);
           addMatrix(treeCrowns, x, 3.05, z, 1.55, 2.15, 1.55);
+        } else {
+          addMatrix(lampPosts, x, 2.5, z, 0.18, 5, 0.18);
+          addOrientedMatrix(
+            lampArms,
+            x,
+            4.8,
+            z,
+            -side * 0.75,
+            0,
+            1.55,
+            0.12,
+            0.16,
+            location.heading,
+          );
+          addOrientedMatrix(
+            lampHeads,
+            x,
+            4.72,
+            z,
+            -side * 1.42,
+            0,
+            0.68,
+            0.18,
+            0.52,
+            location.heading,
+          );
         }
-      }
-    }
-  }
-  for (let roadX = -4; roadX <= 4; roadX++) {
-    for (let roadZ = -4; roadZ <= 4; roadZ++) {
-      if ((roadX + roadZ) % 2 !== 0) continue;
-      const x = roadX * ROAD_SPACING;
-      const z = roadZ * ROAD_SPACING;
-      if (Math.abs(x) < 30 && Math.abs(z) < 30) continue;
-      for (const sx of [-1, 1]) {
-        const px = x + sx * 5.65;
-        const pz = z + (sx > 0 ? -5.7 : 5.7);
-        addMatrix(lampPosts, px, 2.5, pz, 0.18, 5, 0.18);
-        addMatrix(lampArms, px - sx * 0.75, 4.8, pz, 1.55, 0.12, 0.16);
-        addMatrix(lampHeads, px - sx * 1.42, 4.72, pz, 0.68, 0.18, 0.52);
       }
     }
   }
@@ -711,7 +805,6 @@ export function createCity(
     manholeMatrices,
   );
   addInstances(scene, unitBox, drainMaterial, drainMatrices);
-  addInstances(scene, unitBox, curbMaterial, curbMatrices);
   addInstances(scene, new THREE.CylinderGeometry(0.14, 0.2, 1, 6), treeBarkMaterial, treeTrunks);
   addInstances(scene, new THREE.DodecahedronGeometry(0.5, 1), treeLeafMaterial, treeCrowns);
   addInstances(scene, new THREE.CylinderGeometry(0.09, 0.13, 1, 6), streetLampMaterial, lampPosts);
@@ -725,15 +818,21 @@ export function createCity(
   );
   addInstances(scene, unitBox, trafficMaterial, trafficHeads);
 
-  for (let index = 0; index < 18; index++) {
-    const axis: "x" | "z" = random() < 0.5 ? "x" : "z";
-    const lane = (Math.floor(random() * 9) - 4) * ROAD_SPACING;
-    const along = rand(-210, 210);
+  const vehicleRoads = CITY_ROADS.filter((road) => road.kind !== "pedestrian" && road.width >= 7);
+  let vehiclesPlaced = 0;
+  for (let attempts = 0; vehiclesPlaced < 18 && attempts < 54; attempts++) {
+    const road = vehicleRoads[Math.floor(random() * vehicleRoads.length)]!;
+    const location = getRoadPosition(road.id, rand(14, getRoadLength(road.id) - 14));
     const side = random() < 0.5 ? -1 : 1;
-    const x = axis === "x" ? along : lane + side * 2.4;
-    const z = axis === "x" ? lane + side * 2.4 : along;
-    if (Math.abs(x) < 28 && Math.abs(z) < 28) continue;
-    const rotation = axis === "x" ? Math.PI / 2 : 0;
+    const tangentX = -Math.sin(location.heading);
+    const tangentZ = -Math.cos(location.heading);
+    const normalX = -tangentZ;
+    const normalZ = tangentX;
+    const offset = Math.max(0, road.width / 2 - 1.25);
+    const x = location.x + normalX * side * offset;
+    const z = location.z + normalZ * side * offset;
+    if (Math.hypot(x, z) < 30) continue;
+    const rotation = location.heading;
     const paint = Math.floor(random() * vehicleMaterials.length);
     addMatrix(vehicleBodies[paint], x, 0.5, z, 1.9, 0.62, 4.25, rotation);
     addMatrix(vehicleCabins[paint], x, 1.03, z, 1.48, 0.62, 2.1, rotation);
@@ -752,12 +851,14 @@ export function createCity(
     vehicleObstacles.push({
       x,
       z,
-      width: axis === "x" ? 4.25 : 1.9,
-      depth: axis === "x" ? 1.9 : 4.25,
+      width: Math.abs(Math.cos(rotation)) * 1.9 + Math.abs(Math.sin(rotation)) * 4.25,
+      depth: Math.abs(Math.sin(rotation)) * 1.9 + Math.abs(Math.cos(rotation)) * 4.25,
       height: 1.4,
+      baseY: terrainHeight(x, z),
       entranceWidth: 0,
       entranceHeight: 0,
     });
+    vehiclesPlaced++;
   }
 
   addInstances(scene, unitBox, vehicleBumperMaterial, vehicleBumpers);
@@ -781,7 +882,7 @@ export function createCity(
   }
 
   const station = new THREE.Group();
-  station.position.set(-15.5, 0, 15.5);
+  station.position.set(-15.5, terrainHeight(-15.5, 15.5), 15.5);
   const stationFrameMaterial = new THREE.MeshStandardMaterial({
     color: "#3e4d55",
     metalness: 0.55,
@@ -808,7 +909,7 @@ export function createCity(
   scene.add(station);
 
   const hachiko = new THREE.Group();
-  hachiko.position.set(-15.5, 0, 11.8);
+  hachiko.position.set(-15.5, terrainHeight(-15.5, 11.8), 11.8);
   const bronzeMaterial = new THREE.MeshStandardMaterial({
     color: "#866b43",
     metalness: 0.62,
@@ -866,6 +967,8 @@ export function resolveBuildingCollision(
     const maxX = building.x + building.width / 2;
     const minZ = building.z - building.depth / 2;
     const maxZ = building.z + building.depth / 2;
+    const baseY = building.baseY ?? 0;
+    const topY = baseY + building.height;
     const entranceWidth = building.entranceWidth ?? 0;
     const entranceHeight = building.entranceHeight ?? 0;
     const wasInside =
@@ -876,20 +979,15 @@ export function resolveBuildingCollision(
     const isInside =
       position.x > minX && position.x < maxX && position.z > minZ && position.z < maxZ;
 
-    if (
-      previousY >= building.height &&
-      position.y < building.height &&
-      velocity.y <= 0 &&
-      isInside
-    ) {
-      position.y = building.height;
+    if (previousY >= topY && position.y < topY && velocity.y <= 0 && isInside) {
+      position.y = topY;
       velocity.y = 0;
       return;
     }
-    if (position.y >= building.height || position.y + 1.9 <= 0) continue;
+    if (position.y >= topY || position.y + 1.9 <= baseY) continue;
 
-    if (isInside && position.y + 1.9 > building.height) {
-      position.y = building.height - 1.9;
+    if (isInside && position.y + 1.9 > topY) {
+      position.y = topY - 1.9;
       velocity.y = 0;
     }
     if (wasInside !== isInside) {
@@ -899,7 +997,7 @@ export function resolveBuildingCollision(
       const withinDoor =
         Math.abs(position.x - building.x) < entranceWidth / 2 - 0.15 &&
         Math.abs(previousPosition.x - building.x) < entranceWidth / 2 - 0.15 &&
-        position.y + 1.9 <= entranceHeight &&
+        position.y + 1.9 <= baseY + entranceHeight &&
         crossedFront;
       if (!withinDoor) {
         position.x = previousPosition.x;
@@ -918,7 +1016,7 @@ export function resolveBuildingCollision(
       Math.abs(position.x - building.x) < entranceWidth / 2 - 0.15 &&
       position.z < minZ &&
       position.z > minZ - 0.48;
-    if (approachingDoor && position.y + 1.9 <= entranceHeight) continue;
+    if (approachingDoor && position.y + 1.9 <= baseY + entranceHeight) continue;
 
     if (overlapX < overlapZ) {
       const side = position.x < building.x ? -1 : 1;

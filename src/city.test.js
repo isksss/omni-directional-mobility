@@ -41,15 +41,13 @@ test("parked vehicles block entry from the road", () => {
   assert.equal(velocity.x, 0);
 });
 
-test("descending onto a building roof stops at the roof height", () => {
-  const result = move(
-    { x: 0, y: 12.4, z: 0 },
-    { x: 0, y: 11.8, z: 0 },
-    { x: 1, y: -4, z: 0 },
-    12.4,
-  );
-  assert.equal(result.position.y, 12);
-  assert.equal(result.velocity.y, 0);
+test("descending onto a building roof respects its hillside base elevation", () => {
+  const hillsideBuilding = { ...building, baseY: 8 };
+  const position = { x: 0, y: 19.8, z: 0 };
+  const velocity = { x: 1, y: -4, z: 0 };
+  resolveBuildingCollision(position, { x: 0, y: 20.4, z: 0 }, velocity, [hillsideBuilding], 20.4);
+  assert.equal(position.y, 20);
+  assert.equal(velocity.y, 0);
 });
 
 test("city generation creates enterable buildings and leaves the scramble crossing open", () => {
@@ -74,6 +72,8 @@ test("city generation creates enterable buildings and leaves the scramble crossi
     const { buildings, facadeMeshes, obstacles } = createCity(new THREE.Scene(), random);
     assert.ok(buildings.length > 180);
     assert.ok(buildings.every((item) => item.entranceWidth > 0 && item.entranceHeight > 0));
+    assert.ok(buildings.every((item) => Number.isFinite(item.baseY)));
+    assert.ok(buildings.some((item) => item.baseY > 5));
     assert.ok(buildings.every((item) => !(Math.abs(item.x) < 24 && Math.abs(item.z) < 24)));
     assert.ok(facadeMeshes.length > 0);
     assert.ok(obstacles.length >= 12);

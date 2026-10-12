@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { nearestRoadPosition, terrainHeight } from "./city-layout.ts";
 import type { Position3, RandomSource } from "./game-types.ts";
 import { randomBetween } from "./game-utils.ts";
 import type { AmmoType } from "./weapons.ts";
@@ -7,6 +8,7 @@ interface PickupBase {
   group: THREE.Group;
   phase: number;
   collected: boolean;
+  baseY?: number;
 }
 
 export interface AmmoPickup extends PickupBase {
@@ -86,16 +88,18 @@ function makePickupGroup(kind: LootPickup["kind"], ammoType?: AmmoType): THREE.G
 }
 
 function roadPosition(random: RandomSource): [number, number] {
-  const lane = (Math.floor(random() * 9) - 4) * 48;
-  const along = randomBetween(random, -205, 205);
-  return random() < 0.5 ? [along, lane] : [lane, along];
+  const x = randomBetween(random, -210, 210);
+  const z = randomBetween(random, -210, 210);
+  const nearest = nearestRoadPosition(x, z);
+  return [nearest.x, nearest.z];
 }
 
 export function createLoot(scene: THREE.Scene, random: RandomSource): LootPickup[] {
   const pickups: LootPickup[] = [];
   const place = (pickup: LootPickup) => {
     const [x, z] = roadPosition(random);
-    pickup.group.position.set(x, 0.1, z);
+    pickup.baseY = terrainHeight(x, z);
+    pickup.group.position.set(x, pickup.baseY + 0.1, z);
     scene.add(pickup.group);
     pickups.push(pickup);
   };
@@ -131,11 +135,11 @@ export function updateLoot(
   const collected: LootPickup[] = [];
   for (const pickup of pickups) {
     if (pickup.collected) continue;
-    pickup.group.position.y = 0.1 + Math.sin(time * 2 + pickup.phase) * 0.08;
+    pickup.group.position.y = (pickup.baseY ?? 0) + 0.1 + Math.sin(time * 2 + pickup.phase) * 0.08;
     pickup.group.rotation.y = time * 0.55 + pickup.phase;
     const dx = player.x - pickup.group.position.x;
     const dz = player.z - pickup.group.position.z;
-    if (dx * dx + dz * dz > 3.2 ** 2 || Math.abs(player.y) > 3) continue;
+    if (dx * dx + dz * dz > 3.2 ** 2 || Math.abs(player.y - pickup.group.position.y) > 3) continue;
     if (!canCollect(pickup)) continue;
     pickup.collected = true;
     pickup.group.visible = false;

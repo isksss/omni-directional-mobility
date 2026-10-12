@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { createCity, resolveBuildingCollision } from "./city.ts";
+import { terrainHeight } from "./city-layout.ts";
 import { createEnemy, removeEnemy, syncEnemy, updateEnemyHealthBar } from "./enemy-visuals.ts";
 import { constrainRope } from "./flight.ts";
 import { ENEMY_DAMAGE, updateEnemy, updateEnemyAI } from "./enemies.ts";
@@ -157,6 +158,7 @@ const zoneRing = new THREE.LineLoop(
   new THREE.LineBasicMaterial({ color: "#64d7ff", transparent: true, opacity: 0.8 }),
 );
 zoneRing.scale.set(ZONE_START_RADIUS, 1, ZONE_START_RADIUS);
+const zoneRingPositions = zoneRing.geometry.attributes.position as THREE.BufferAttribute;
 zoneRing.frustumCulled = false;
 scene.add(zoneRing);
 
@@ -239,7 +241,7 @@ function damagePlayer(damage: number, flash = true): void {
 
 function showEnemyShot(enemy: EnemyActor, hit: boolean): void {
   const positions = enemy.shotLine.geometry.attributes.position;
-  positions.setXYZ(0, enemy.group.position.x, 1.3, enemy.group.position.z);
+  positions.setXYZ(0, enemy.group.position.x, enemy.group.position.y + 1.3, enemy.group.position.z);
   positions.setXYZ(1, player.position.x, player.position.y + EYE_HEIGHT, player.position.z);
   positions.needsUpdate = true;
   enemy.shotLine.geometry.computeBoundingSphere();
@@ -354,32 +356,36 @@ function reloadCurrentWeapon(): void {
   showNotice(`リロード完了 — ${weapon.magazine} / ${weapon.reserve}`);
 }
 
-function chaseEnemy(enemy: EnemyActor, dt: number): boolean {
-  const x = enemy.axis === "x" ? enemy.along : enemy.lane;
-  const z = enemy.axis === "x" ? enemy.lane : enemy.along;
-  const dx = player.position.x - x;
-  const dz = player.position.z - z;
+function moveEnemyToward(
+  enemy: EnemyActor,
+  targetX: number,
+  targetZ: number,
+  dt: number,
+  stoppingDistance: number,
+): boolean {
+  const x = enemy.navX;
+  const z = enemy.navZ;
+  const dx = targetX - x;
+  const dz = targetZ - z;
   const distance = Math.hypot(dx, dz);
   if (distance > 0) enemy.targetHeading = Math.atan2(-dx, -dz);
-  if (distance <= 4.5) return false;
-  const step = Math.min(distance - 4.5, 4.8 * dt);
+  if (distance <= stoppingDistance) return false;
+  const step = Math.min(distance - stoppingDistance, enemy.moveSpeed * dt);
   const nextX = x + (dx / distance) * step;
   const nextZ = z + (dz / distance) * step;
-  enemyCollisionPrevious.set(x, 0, z);
-  enemyCollisionCandidate.set(nextX, 0, nextZ);
+  enemyCollisionPrevious.set(x, terrainHeight(x, z), z);
+  enemyCollisionCandidate.set(nextX, terrainHeight(nextX, nextZ), nextZ);
   enemyCollisionVelocity.subVectors(enemyCollisionCandidate, enemyCollisionPrevious);
   resolveBuildingCollision(
     enemyCollisionCandidate,
     enemyCollisionPrevious,
     enemyCollisionVelocity,
     worldBlockers,
-    0,
+    enemyCollisionPrevious.y,
   );
   const moved = enemyCollisionCandidate.x !== x || enemyCollisionCandidate.z !== z;
-  enemy.axis = Math.abs(dx) >= Math.abs(dz) ? "x" : "z";
-  enemy.direction = Math.sign(enemy.axis === "x" ? dx : dz) || enemy.direction;
-  enemy.along = enemy.axis === "x" ? enemyCollisionCandidate.x : enemyCollisionCandidate.z;
-  enemy.lane = enemy.axis === "x" ? enemyCollisionCandidate.z : enemyCollisionCandidate.x;
+  enemy.navX = enemyCollisionCandidate.x;
+  enemy.navZ = enemyCollisionCandidate.z;
   return moved;
 }
 
@@ -405,6 +411,12 @@ function updateEnemies(dt: number): void {
   roundElapsed += dt;
   const zoneRadius = getSafeZoneRadius(roundElapsed);
   zoneRing.scale.set(zoneRadius, 1, zoneRadius);
+  for (let index = 0; index < zoneRingPositions.count; index++) {
+    const x = zoneRingPositions.getX(index) * zoneRadius;
+    const z = zoneRingPositions.getZ(index) * zoneRadius;
+    zoneRingPositions.setY(index, terrainHeight(x, z) + 0.055);
+  }
+  zoneRingPositions.needsUpdate = true;
   const outsideZone = isOutsideSafeZone(player.position, zoneRadius);
   if (outsideZone !== wasOutsideZone) {
     showNotice(
@@ -428,9 +440,16 @@ function updateEnemies(dt: number): void {
     const enemy = enemies[index];
     if (!enemy) continue;
     const shot = updateEnemyAI(enemy, dt, player.position, worldBlockers, random);
-    enemy.walking = enemy.canSeePlayer ? chaseEnemy(enemy, dt) : updateEnemy(enemy, dt, random);
-    if (enemy.walking) enemy.walkPhase += dt * (enemy.canSeePlayer ? 9 : enemy.speed * 3.5);
-    else enemy.idlePhase += dt * 1.4;
+    const investigating = !enemy.canSeePlayer && enemy.searchTimer > 0 && enemy.hasLastSeen;
+    const desiredSpeed = enemy.canSeePlayer ? 4.8 : investigating ? 3.1 : enemy.speed;
+    enemy.moveSpeed = THREE.MathUtils.damp(enemy.moveSpeed, desiredSpeed, 4.5, dt);
+    enemy.walking = enemy.canSeePlayer
+      ? moveEnemyToward(enemy, player.position.x, player.position.z, dt, 4.5)
+      : investigating
+        ? moveEnemyToward(enemy, enemy.lastSeenX, enemy.lastSeenZ, dt, 6)
+        : updateEnemy(enemy, dt, random);
+    if (enemy.walking) enemy.walkPhase += dt * Math.max(4, enemy.moveSpeed * 2.2);
+    enemy.idlePhase += dt * (enemy.alerted ? 2.2 : 1.3);
     enemy.shotTimer = Math.max(0, enemy.shotTimer - dt);
     enemy.shotLine.visible = enemy.shotTimer > 0;
     syncEnemy(enemy, camera, dt);
@@ -450,7 +469,8 @@ function updateEnemies(dt: number): void {
 }
 
 function updateFlight(dt: number): void {
-  const grounded = player.position.y <= 0.02;
+  const groundY = terrainHeight(player.position.x, player.position.z);
+  const grounded = player.position.y <= groundY + 0.02;
   moveForward.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
   moveRight.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
   moveDirection.set(0, 0, 0);
@@ -511,8 +531,9 @@ function updateFlight(dt: number): void {
     previousY,
   );
 
-  if (player.position.y < 0) {
-    player.position.y = 0;
+  const terrainY = terrainHeight(player.position.x, player.position.z);
+  if (player.position.y < terrainY) {
+    player.position.y = terrainY;
     if (player.velocity.y < 0) player.velocity.y = 0;
   }
   if (player.position.y > MAX_ALTITUDE) {
@@ -701,7 +722,11 @@ window.addEventListener("keydown", (event) => {
     if (event.code === keyBindings.hookRight) beginTether(1);
     if (event.code === keyBindings.weaponSwitch) switchWeapon();
     if (event.code === keyBindings.reload) reloadCurrentWeapon();
-    if (event.code === keyBindings.jump && !tethers.some(Boolean) && player.position.y <= 0.03) {
+    if (
+      event.code === keyBindings.jump &&
+      !tethers.some(Boolean) &&
+      player.position.y <= terrainHeight(player.position.x, player.position.z) + 0.03
+    ) {
       player.velocity.y = 9.2;
     }
   }

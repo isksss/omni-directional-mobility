@@ -12,6 +12,7 @@ export interface BuildingBounds {
   width: number;
   depth: number;
   height: number;
+  baseY?: number;
   entranceWidth?: number;
   entranceHeight?: number;
 }

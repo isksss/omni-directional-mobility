@@ -1,13 +1,16 @@
 import * as THREE from "three";
+import { CITY_ROADS, getRoadLength, getRoadPosition, terrainHeight } from "./city-layout.ts";
 import type { RandomSource } from "./game-types.ts";
-import { getEnemyGait, getRouteHeading, smoothHeading } from "./enemies.ts";
+import { getEnemyGait, smoothHeading } from "./enemies.ts";
 
 export interface EnemyActor {
-  axis: "x" | "z";
-  lane: number;
-  along: number;
-  direction: number;
+  roadId: string;
+  roadDistance: number;
+  roadDirection: 1 | -1;
+  navX: number;
+  navZ: number;
   speed: number;
+  moveSpeed: number;
   walkPhase: number;
   idlePhase: number;
   walking: boolean;
@@ -15,11 +18,15 @@ export interface EnemyActor {
   targetHeading: number;
   aimBlend: number;
   aimPitch: number;
+  searchTimer: number;
+  lastSeenX: number;
+  lastSeenZ: number;
+  hasLastSeen: boolean;
+  lookYaw: number;
   health: number;
   maxHealth: number;
   attackTimer: number;
-  alertTimer: number;
-  aiTimer?: number;
+  aiTimer: number;
   canSeePlayer: boolean;
   aiming: boolean;
   alerted: boolean;
@@ -201,15 +208,20 @@ export function createEnemy(
   shotLine.frustumCulled = false;
   scene.add(shotLine);
 
-  const axis: "x" | "z" = random() < 0.5 ? "x" : "z";
-  const direction = random() < 0.5 ? -1 : 1;
-  const heading = getRouteHeading(axis, direction);
+  const patrolRoads = CITY_ROADS.filter((road) => road.kind !== "pedestrian");
+  const road = patrolRoads[Math.floor(random() * patrolRoads.length)]!;
+  const roadDirection: 1 | -1 = random() < 0.5 ? 1 : -1;
+  const roadDistance = rand(0, getRoadLength(road.id));
+  const location = getRoadPosition(road.id, roadDistance, roadDirection);
+  const heading = location.heading;
   const enemy = {
-    axis,
-    lane: (Math.floor(random() * 9) - 4) * 48,
-    along: rand(-192, 192),
-    direction,
+    roadId: road.id,
+    roadDistance,
+    roadDirection,
+    navX: location.x,
+    navZ: location.z,
     speed: rand(1.4, 2.6),
+    moveSpeed: 0,
     walkPhase: rand(0, Math.PI * 2),
     idlePhase: rand(0, Math.PI * 2),
     walking: false,
@@ -217,10 +229,15 @@ export function createEnemy(
     targetHeading: heading,
     aimBlend: 0,
     aimPitch: 0,
+    searchTimer: 0,
+    lastSeenX: 0,
+    lastSeenZ: 0,
+    hasLastSeen: false,
+    lookYaw: 0,
     health: 100,
     maxHealth: 100,
     attackTimer: random(),
-    alertTimer: 0,
+    aiTimer: 0,
     canSeePlayer: false,
     aiming: false,
     alerted: false,
@@ -247,14 +264,9 @@ export function createEnemy(
 }
 
 export function syncEnemy(enemy: EnemyActor, camera: THREE.Camera, dt = 1 / 60): void {
-  enemy.group.position.set(
-    enemy.axis === "x" ? enemy.along : enemy.lane,
-    0,
-    enemy.axis === "x" ? enemy.lane : enemy.along,
-  );
-  enemy.targetHeading = Number.isFinite(enemy.targetHeading)
-    ? enemy.targetHeading
-    : getRouteHeading(enemy.axis, enemy.direction);
+  const groundY = terrainHeight(enemy.navX, enemy.navZ);
+  enemy.group.position.set(enemy.navX, groundY, enemy.navZ);
+  enemy.targetHeading = Number.isFinite(enemy.targetHeading) ? enemy.targetHeading : enemy.heading;
   enemy.heading = smoothHeading(enemy.heading, enemy.targetHeading, dt, enemy.walking ? 7 : 10);
   enemy.group.rotation.y = enemy.heading;
   enemy.aimBlend = THREE.MathUtils.damp(enemy.aimBlend, enemy.aiming ? 1 : 0, 8, dt);
@@ -273,10 +285,19 @@ export function syncEnemy(enemy: EnemyActor, camera: THREE.Camera, dt = 1 / 60):
     enemy.arms[i].rotation.z = i === 0 ? 0.45 : -0.45;
     enemy.elbows[i].rotation.x = 0.48 - enemy.aimBlend * 0.13;
   }
+  const searchLook = enemy.alerted
+    ? Math.sin(enemy.idlePhase * 1.1) * 0.38
+    : Math.sin(enemy.idlePhase * 0.65) * 0.24;
+  const desiredLookYaw = enemy.canSeePlayer
+    ? THREE.MathUtils.clamp(enemy.lookYaw, -0.24, 0.24)
+    : THREE.MathUtils.clamp(enemy.lookYaw + searchLook, -0.9, 0.9);
   enemy.head.rotation.x = enemy.aimBlend * 0.18 + Math.sin(enemy.idlePhase) * 0.008;
-  enemy.group.position.y = enemy.walking
-    ? Math.abs(Math.sin(enemy.walkPhase * 2)) * 0.045
-    : Math.sin(enemy.idlePhase) * 0.008;
+  enemy.head.rotation.y = THREE.MathUtils.damp(enemy.head.rotation.y, desiredLookYaw, 5.5, dt);
+  enemy.group.position.y =
+    groundY +
+    (enemy.walking
+      ? Math.abs(Math.sin(enemy.walkPhase * 2)) * 0.045
+      : Math.sin(enemy.idlePhase) * 0.008);
   enemy.group.updateMatrixWorld(true);
   enemy.healthBar.position.set(
     enemy.group.position.x,
